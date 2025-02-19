@@ -2,6 +2,9 @@
 #include "claves.h"
 
 int main() {
-    // Código de prueba para llamar a la API
+
+    printf("\033[0;32mCLIENTE iniciado...\033[0m\n");
+    destroy();
     return 0;
 }
+

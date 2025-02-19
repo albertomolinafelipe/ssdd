@@ -1,39 +1,29 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -fPIC
-LDFLAGS = -Lbuild -lclaves -lrt -lpthread
-TARGET_LIB = build/libclaves.so
-TARGET_SERVER = bin/servidor
-TARGET_CLIENT = bin/cliente
+CC=gcc
+CFLAGS=-Wall -fPIC -D_REENTRANT
+LDFLAGS=-lrt
 
-SRCS_LIB = claves.c
-OBJS_LIB = $(SRCS_LIB:.c=.o)
+BIN_DIR=bin
+BUILD_DIR=build
 
-SRCS_SERVER = servidor-mq.c
-OBJS_SERVER = $(SRCS_SERVER:.c=.o)
+all: $(BIN_DIR)/servidor $(BIN_DIR)/cliente $(BUILD_DIR)/libclaves.so
 
-SRCS_CLIENT = app-cliente.c proxy-mq.c
-OBJS_CLIENT = $(SRCS_CLIENT:.c=.o)
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
-all: build bin $(TARGET_LIB) $(TARGET_SERVER) $(TARGET_CLIENT)
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
 
-build:
-	mkdir -p build
+$(BUILD_DIR)/proxy-mq.o: proxy-mq.c claves.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c proxy-mq.c -o $(BUILD_DIR)/proxy-mq.o
 
-bin:
-	mkdir -p bin
+$(BUILD_DIR)/libclaves.so: $(BUILD_DIR)/proxy-mq.o | $(BUILD_DIR)
+	$(CC) -shared -o $(BUILD_DIR)/libclaves.so $(BUILD_DIR)/proxy-mq.o $(LDFLAGS)
 
-$(TARGET_LIB): $(OBJS_LIB)
-	$(CC) -shared -o $@ $^
+$(BIN_DIR)/servidor: servidor-mq.c claves.c claves.h | $(BIN_DIR)
+	$(CC) $(CFLAGS) servidor-mq.c claves.c -o $(BIN_DIR)/servidor $(LDFLAGS)
 
-$(TARGET_SERVER): $(OBJS_SERVER) $(TARGET_LIB)
-	$(CC) -o $@ $^ $(LDFLAGS)
-
-$(TARGET_CLIENT): $(OBJS_CLIENT) $(TARGET_LIB)
-	$(CC) -o $@ $^ $(LDFLAGS)
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+$(BIN_DIR)/cliente: app-cliente.c claves.h $(BUILD_DIR)/libclaves.so | $(BIN_DIR)
+	$(CC) $(CFLAGS) app-cliente.c -o $(BIN_DIR)/cliente -L$(BUILD_DIR) -lclaves -Wl,-rpath=$(BUILD_DIR)
 
 clean:
-	rm -f *.o $(TARGET_LIB) $(TARGET_SERVER) $(TARGET_CLIENT)
-	rm -rf build bin
+	rm -rf $(BUILD_DIR) $(BIN_DIR)

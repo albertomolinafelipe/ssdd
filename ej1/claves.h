@@ -1,5 +1,33 @@
 #ifndef CLAVES_H
 #define CLAVES_H
+#include <sys/types.h>
+#include <pthread.h>
+
+#define MQ_NAME "/ssdd-e1"
+#define MAX_MESSAGES 16
+
+// Message and command types
+typedef enum {
+    MSG_TYPE_REQUEST,
+    MSG_TYPE_RESPONSE
+} msg_type_t;
+
+typedef enum {
+    CMD_TYPE_DESTROY,
+    CMD_TYPE_SET,
+    CMD_TYPE_GET,
+    CMD_TYPE_MODIFY,
+    CMD_TYPE_DELETE,
+    CMD_TYPE_EXIST
+} cmd_type_t;
+
+// Message
+typedef struct {
+    msg_type_t type;
+    cmd_type_t cmd;
+    pid_t sender_pid;          
+    pthread_t sender_tid;
+} mq_message_t;
 
 
 struct Coord {
