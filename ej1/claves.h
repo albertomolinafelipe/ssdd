@@ -36,6 +36,8 @@ typedef struct {
     pid_t sender_pid;          
     unsigned long sender_tid;
 
+    int result;
+
     int key;
     char value1[255];
     int N_value2;
@@ -44,8 +46,7 @@ typedef struct {
 } mq_message_t;
 
 
-
-static inline void print_mq_msg(mq_message_t *msg) {
+static inline void print_mq_msg(mq_message_t *msg, int detailed) {
     const char *type_str = (msg->type == MSG_TYPE_REQUEST) ? "REQ" : "RESP";
     const char *cmd_str;
 
@@ -61,8 +62,19 @@ static inline void print_mq_msg(mq_message_t *msg) {
 
     printf("%s - %s - %d:%lu\n",
            type_str, cmd_str, msg->sender_pid, msg->sender_tid);
-}
 
+    if (detailed) {
+        printf("    Key: %d\n", msg->key);
+        printf("    Value1: %s\n", msg->value1);
+        printf("    N_value2: %d\n", msg->N_value2);
+        printf("    V_value2: [");
+        for (int i = 0; i < msg->N_value2 && i < 32; i++) {
+            printf("%lf%s", msg->V_value2[i], (i < msg->N_value2 - 1) ? ", " : "");
+        }
+        printf("]\n");
+        printf("    Value3: {x: %d, y: %d}\n", msg->value3.x, msg->value3.y);
+    }
+}
 
 /**
  * @brief Esta llamada permite inicializar el servicio de elementos clave-valor1-valor2-valor3.

@@ -15,13 +15,12 @@ static int send_request(mqd_t mq, mq_message_t *msg) {
     return 0;
 }
 
-static int receive_response(mqd_t mq) {
+static mq_message_t receive_response(mqd_t mq) {
     mq_message_t response;
     if (mq_receive(mq, (char *)&response, sizeof(mq_message_t), NULL) == -1) {
         perror("mq_receive");
-        return -1;
     }
-    return 0;
+    return response;
 }
 
 static int make_request(mq_message_t *msg) {
@@ -59,10 +58,13 @@ static int make_request(mq_message_t *msg) {
         mq_unlink(response_queue);
         return -2;
     }
-    if (receive_response(response_mq)) {
-        return -2;
+    
+    mq_message_t response = receive_response(response_mq);
+    
+    if (msg->cmd == CMD_TYPE_GET) {
+        memcpy(msg, &response, sizeof(mq_message_t));
     }
-
+    
     mq_close(response_mq);
     mq_unlink(response_queue);
     mq_close(mq);
@@ -89,7 +91,7 @@ int set_value(int key, char *value1, int N_value2, double *V_value2, struct Coor
         .N_value2 = N_value2,
         .value3 = value3,
     };
-    // Limit string just in case
+    // Limit string
     strncpy(msg.value1, value1, sizeof(msg.value1) - 1);
     msg.value1[sizeof(msg.value1) - 1] = '\0';
 
@@ -99,7 +101,19 @@ int set_value(int key, char *value1, int N_value2, double *V_value2, struct Coor
 }
 
 int get_value(int key, char *value1, int *N_value2, double *V_value2, struct Coord *value3) {
-    return 0;
+    mq_message_t msg = {
+        .cmd = CMD_TYPE_GET,
+        .key = key
+    };
+
+    int err = make_request(&msg);
+    if (err == 0) {
+        strncpy(value1, msg.value1, sizeof(msg.value1) - 1);
+        *N_value2 = msg.N_value2;
+        memcpy(V_value2, msg.V_value2, msg.N_value2 * sizeof(double));
+        *value3 = msg.value3;
+    }
+    return err;
 }
 
 int modify_value(int key, char *value1, int N_value2, double *V_value2, struct Coord value3) {

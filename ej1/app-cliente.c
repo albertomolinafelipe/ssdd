@@ -25,17 +25,17 @@ int main(int argc, char **argv) {
         printf("SET success\n");
 
     } else if (strcmp(argv[1], "--get") == 0) {
-        char* v1;
-        double* v2;
+        char v1[256];
+        double v2[32];
         int N_value2;
         struct Coord v3;
 
         int err = get_value(key, v1, &N_value2, v2, &v3);
         if (err == -1) {
-            printf("Error al obtener la tupla\n");
+            printf("GET error\n");
             return 1;
         }
-        printf("Retrieved tuple: v1=%s, N_value2=%d, v3=(%d, %d)\n", v1, N_value2, v3.x, v3.y);
+        printf("GET result: v1=%s, N_value2=%d, v3=(%d, %d)\n", v1, N_value2, v3.x, v3.y);
 
     } else {
         printf("Invalid argument. Use --set or --get\n");
