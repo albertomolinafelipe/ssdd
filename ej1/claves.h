@@ -2,9 +2,17 @@
 #define CLAVES_H
 #include <sys/types.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 #define MQ_NAME "/ssdd-e1"
 #define MAX_MESSAGES 16
+
+struct Coord {
+   int x ;
+   int y ;
+} ;
+
 
 // Message and command types
 typedef enum {
@@ -26,14 +34,34 @@ typedef struct {
     msg_type_t type;
     cmd_type_t cmd;
     pid_t sender_pid;          
-    pthread_t sender_tid;
+    unsigned long sender_tid;
+
+    int key;
+    char value1[255];
+    int N_value2;
+    double V_value2[32];
+    struct Coord value3;
 } mq_message_t;
 
 
-struct Coord {
-   int x ;
-   int y ;
-} ;
+
+static inline void print_mq_msg(mq_message_t *msg) {
+    const char *type_str = (msg->type == MSG_TYPE_REQUEST) ? "REQ" : "RESP";
+    const char *cmd_str;
+
+    switch (msg->cmd) {
+        case CMD_TYPE_DESTROY: cmd_str = "DESTROY"; break;
+        case CMD_TYPE_SET:     cmd_str = "SET";     break;
+        case CMD_TYPE_GET:     cmd_str = "GET";     break;
+        case CMD_TYPE_MODIFY:  cmd_str = "MODIFY";  break;
+        case CMD_TYPE_DELETE:  cmd_str = "DELETE";  break;
+        case CMD_TYPE_EXIST:   cmd_str = "EXIST";   break;
+        default:               cmd_str = "UNKNOWN"; break;
+    }
+
+    printf("%s - %s - %d:%lu\n",
+           type_str, cmd_str, msg->sender_pid, msg->sender_tid);
+}
 
 
 /**
