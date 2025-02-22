@@ -15,6 +15,7 @@ typedef struct Node {
 static Node *head = NULL;
 
 int destroy() {
+    // free every node
     Node *current = head;
     while (current) {
         Node *next = current->next;
@@ -27,17 +28,22 @@ int destroy() {
 }
 
 int set_value(int key, char *value1, int N_value2, double *V_value2, struct Coord value3) {
+    // check format
     if (N_value2 < 1 || N_value2 > 32) return -1;
     
+    // go to last element, check if key already exists
     Node *current = head;
     while (current) {
         if (current->key == key) return -1;
         current = current->next;
     }
     
+    // new node
     Node *new_node = (Node *)malloc(sizeof(Node));
     if (!new_node) return -1;
     
+    // populate new node
+    // only copy 255 characters, even if its shorter
     new_node->key = key;
     strncpy(new_node->value1, value1, 255);
     new_node->value1[255] = '\0';
@@ -55,24 +61,30 @@ int set_value(int key, char *value1, int N_value2, double *V_value2, struct Coor
 }
 
 int get_value(int key, char *value1, int *N_value2, double *V_value2, struct Coord *value3) {
+    // find key, copy vlaue and return
     Node *current = head;
     while (current) {
         if (current->key == key) {
+            // value1 should be at least 255
             strcpy(value1, current->value1);
             *N_value2 = current->N_value2;
+            // value2 should be at least 32
             memcpy(V_value2, current->V_value2, (*N_value2) * sizeof(double));
             *value3 = current->value3;
             return 0;
         }
         current = current->next;
     }
+    // key not found
     return -1;
 }
 
 int modify_value(int key, char *value1, int N_value2, double *V_value2, struct Coord value3) {
+    // check format
     if (N_value2 < 1 || N_value2 > 32) return -1;
     
     Node *current = head;
+    // find key and set values
     while (current) {
         if (current->key == key) {
             strncpy(current->value1, value1, 255);
@@ -87,10 +99,12 @@ int modify_value(int key, char *value1, int N_value2, double *V_value2, struct C
         }
         current = current->next;
     }
+    // key not found
     return -1;
 }
 
 int delete_key(int key) {
+    // find and free key, fix linked list
     Node *current = head, *prev = NULL;
     while (current) {
         if (current->key == key) {
@@ -106,10 +120,12 @@ int delete_key(int key) {
         prev = current;
         current = current->next;
     }
+    // key not found
     return -1;
 }
 
 int exist(int key) {
+    // look for key
     Node *current = head;
     while (current) {
         if (current->key == key) {
@@ -117,5 +133,6 @@ int exist(int key) {
         }
         current = current->next;
     }
+    // key not found
     return 0;
 }

@@ -4,6 +4,8 @@
 #include <pthread.h>
 #include "claves.h"
 
+int VERBOSE = 0;
+
 mq_message_t get_response(mq_message_t *msg) {
    
     mq_message_t response;
@@ -50,8 +52,12 @@ mq_message_t get_response(mq_message_t *msg) {
     return response;
 }
 
-int main() {
-
+int main(int argc, char *argv[]) {
+    if (argc > 1 && (strcmp(argv[1], "--verbose") == 0 || strcmp(argv[1], "-v") == 0)) {
+        VERBOSE = 1;
+    }
+    
+    // open main mq
     struct mq_attr attr = { 
         .mq_flags = 0, 
         .mq_maxmsg = 10, 
@@ -66,24 +72,23 @@ int main() {
 
     mq_message_t msg;
     while (1) {
-        // Receive request
+        // receive request
         if (mq_receive(mq, (char *)&msg, sizeof(mq_message_t), NULL) == -1) {
             perror("mq_receive");
             break;
         }
-        print_mq_msg(&msg, 1);
+        print_mq_msg(&msg, VERBOSE);
 
-        // Response MQ
+        // open response mq
         char response_queue[64];
         snprintf(response_queue, sizeof(response_queue), MQ_NAME "-%d-%lu", msg.sender_pid, (unsigned long)msg.sender_tid);
-        
         mqd_t response_mq = mq_open(response_queue, O_CREAT | O_WRONLY, 0666, &attr);
         if (response_mq == (mqd_t)-1) {
             perror("mq_open (create response queue)");
             continue;
         }
         
-        // Send response
+        // send response
         mq_message_t response_msg = get_response(&msg);
         if (mq_send(response_mq, (const char *)&response_msg, sizeof(response_msg), 0) == -1) {
             perror("mq_send (response)");

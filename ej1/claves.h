@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #define MQ_NAME "/ssdd-e1"
 #define MAX_MESSAGES 16
@@ -47,7 +48,6 @@ typedef struct {
 
 
 static inline void print_mq_msg(mq_message_t *msg, int detailed) {
-    const char *type_str = (msg->type == MSG_TYPE_REQUEST) ? "REQ" : "RESP";
     const char *cmd_str;
 
     switch (msg->cmd) {
@@ -59,22 +59,24 @@ static inline void print_mq_msg(mq_message_t *msg, int detailed) {
         case CMD_TYPE_EXIST:   cmd_str = "EXIST";   break;
         default:               cmd_str = "UNKNOWN"; break;
     }
-
-    printf("%s - %s - %d:%lu\n",
-           type_str, cmd_str, msg->sender_pid, msg->sender_tid);
-
+    printf("%s\t%d:%lu\n", cmd_str, msg->sender_pid, msg->sender_tid);
     if (detailed) {
-        printf("    Key: %d\n", msg->key);
-        printf("    Value1: %s\n", msg->value1);
-        printf("    N_value2: %d\n", msg->N_value2);
-        printf("    V_value2: [");
-        for (int i = 0; i < msg->N_value2 && i < 32; i++) {
-            printf("%lf%s", msg->V_value2[i], (i < msg->N_value2 - 1) ? ", " : "");
+        if (msg->cmd != CMD_TYPE_DESTROY) {
+            printf("\tKey: %d\n", msg->key);
         }
-        printf("]\n");
-        printf("    Value3: {x: %d, y: %d}\n", msg->value3.x, msg->value3.y);
+        if (msg->cmd == CMD_TYPE_SET || msg->cmd == CMD_TYPE_MODIFY) {
+            printf("\tValue1: %s\n", msg->value1);
+            printf("\tN_value2: %d\n", msg->N_value2);
+            printf("\tV_value2: [");
+            for (int i = 0; i < msg->N_value2 && i < 32; i++) {
+                printf("%lf%s", msg->V_value2[i], (i < msg->N_value2 - 1) ? ", " : "");
+            }
+            printf("\t]\n");
+            printf("\tValue3: {x: %d, y: %d}\n", msg->value3.x, msg->value3.y);
+        }
     }
 }
+
 
 /**
  * @brief Esta llamada permite inicializar el servicio de elementos clave-valor1-valor2-valor3.
