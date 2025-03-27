@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <cjson/cJSON.h>
 
 /*
  - cmd      = 4
@@ -76,9 +75,8 @@ static inline void print_msg(message_t *msg, int detailed) {
         default:                type_str = "UNKNOWN"; break;
     }
 
-    // Print the command type and sender_tid
-    printf("(%s)\t%s\t%lu\n", type_str, cmd_str, msg->sender_tid);
     if (!detailed) return;
+    printf("(%s)\t%s\t%lu\n", type_str, cmd_str, msg->sender_tid);
 
     if (msg->type == MSG_TYPE_RESPONSE) {
         printf("\tResult: %d\n", msg->result);

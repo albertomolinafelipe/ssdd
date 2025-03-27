@@ -5,8 +5,8 @@
 #include <pthread.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <cjson/cJSON.h>
 #include <fcntl.h>
+#include <errno.h>
 #include "claves.h"
 
 #define MAX_CONN 10
@@ -16,114 +16,165 @@ int busy = 0 ;
 pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER ;
 pthread_cond_t  c = PTHREAD_COND_INITIALIZER ;
 
-char *pack_response(const message_t *msg) {
-    if (!msg) return NULL;
+ssize_t send_message(int fd, const void *buffer, size_t n) {
+    if (!buffer || n == 0) return -1;
+    return write(fd, buffer, n);
+}
 
-    cJSON *json = cJSON_CreateObject();
-    if (!json) return NULL;
+ssize_t read_line(int fd, void *buffer, size_t n) {
+    ssize_t numRead; /* Number of bytes fetched by last read() */
+    size_t totRead;   /* Total bytes read so far */
+    char *buf;
+    char ch;
 
-    cJSON_AddNumberToObject(json, "cmd", msg->cmd);
-    cJSON_AddNumberToObject(json, "result", msg->result);
-    cJSON_AddNumberToObject(json, "sender_tid", msg->sender_tid);
-    cJSON_AddNumberToObject(json, "type", msg->type);
+    /* Check for invalid input */
+    if (n <= 0 || buffer == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
 
-    if (msg->cmd == CMD_TYPE_GET && msg->result == 0) {
-        cJSON_AddNumberToObject(json, "key", msg->key);
+    buf = buffer;
+    totRead = 0;
 
-        cJSON_AddStringToObject(json, "value1", msg->value1);
+    /* Loop to read characters until newline, null terminator, EOF, or error */
+    for (;;) {
+        numRead = read(fd, &ch, 1); /* Read a single byte */
 
-        cJSON_AddNumberToObject(json, "N_value2", msg->N_value2);
-        cJSON *array = cJSON_CreateArray();
-        if (!array) {
-            cJSON_Delete(json);
-            return NULL;
+        if (numRead == -1) {
+            /* Error occurred during read */
+            if (errno == EINTR) {
+                /* Interrupted system call, retry read */
+                continue;
+            } else {
+                /* Other error, return -1 */
+                return -1;
+            }
+        } else if (numRead == 0) {
+            /* End of file (EOF) reached */
+            if (totRead == 0) {
+                /* No bytes read before EOF, return 0 */
+                return 0;
+            } else {
+                /* Bytes read before EOF, break out of the loop */
+                break;
+            }
+        } else {
+            /* Successfully read one byte */
+            if (ch == '\n' || ch == '\0') {
+                /* Newline or null terminator encountered, break out of the loop */
+                break;
+            }
+
+            /* Check if buffer has space for the character */
+            if (totRead < n - 1) {
+                /* Store the character in the buffer */
+                totRead++;
+                *buf++ = ch;
+            }
+            /* If totRead >= n-1, the character is discarded */
         }
+    }
+
+    /* Null-terminate the buffer */
+    *buf = '\0';
+
+    /* Return the total number of bytes read */
+    return totRead;
+}
+
+
+void pack_response(int socket, const message_t *msg) {
+    if (!msg) return;
+
+    char buffer[256];
+
+    // command
+    sprintf(buffer, "%d", msg->cmd);
+    send_message(socket, buffer, strlen(buffer) + 1);
+
+    // result
+    sprintf(buffer, "%d", msg->result);
+    send_message(socket, buffer, strlen(buffer) + 1);
+
+    // sender_tid
+    sprintf(buffer, "%lu", msg->sender_tid);
+    send_message(socket, buffer, strlen(buffer) + 1);
+
+    // type
+    sprintf(buffer, "%d", msg->type);
+    send_message(socket, buffer, strlen(buffer) + 1);
+
+    // values only on get
+    if (msg->cmd == CMD_TYPE_GET && msg->result == 0) {
+        sprintf(buffer, "%d", msg->key);
+        send_message(socket, buffer, strlen(buffer) + 1);
+
+        send_message(socket, msg->value1, strlen(msg->value1) + 1);
+
+        sprintf(buffer, "%d", msg->N_value2);
+        send_message(socket, buffer, strlen(buffer) + 1);
 
         for (int i = 0; i < msg->N_value2; i++) {
-            cJSON_AddItemToArray(array, cJSON_CreateNumber(msg->V_value2[i]));
-        }
-        cJSON_AddItemToObject(json, "V_value2", array);
-
-        cJSON *coord = cJSON_CreateObject();
-        if (!coord) {
-            cJSON_Delete(json);
-            return NULL;
+            sprintf(buffer, "%f", msg->V_value2[i]);
+            send_message(socket, buffer, strlen(buffer) + 1);
         }
 
-        cJSON_AddNumberToObject(coord, "x", msg->value3.x);
-        cJSON_AddNumberToObject(coord, "y", msg->value3.y);
-        cJSON_AddItemToObject(json, "value3", coord);
+        sprintf(buffer, "%d", msg->value3.x);
+        send_message(socket, buffer, strlen(buffer) + 1);
+
+        sprintf(buffer, "%d", msg->value3.y);
+        send_message(socket, buffer, strlen(buffer) + 1);
     }
-
-    char *json_str = cJSON_PrintUnformatted(json);
-    cJSON_Delete(json);
-
-    return json_str;
 }
 
-int unpack_request(const char *json_str, message_t *msg) {
-    if (!json_str || !msg) return -1;
 
-    cJSON *json = cJSON_Parse(json_str);
-    if (!json) return -1;
 
-    cJSON *cmd = cJSON_GetObjectItem(json, "cmd");
-    cJSON *sender_tid = cJSON_GetObjectItem(json, "sender_tid");
-    cJSON *type = cJSON_GetObjectItem(json, "type");
-    
-    if (!cmd || !sender_tid || !type) {
-        cJSON_Delete(json);
-        return -1;
+int unpack_request(int socket, message_t *msg) {
+    if (!msg) return -1;
+
+    char buffer[256];
+
+    // command
+    if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+    msg->cmd = atoi(buffer);
+
+    // sender_tid
+    if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+    msg->sender_tid = strtoul(buffer, NULL, 10);
+
+    // type
+    if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+    msg->type = atoi(buffer);
+
+    // key (if not destroy)
+    if (msg->cmd != CMD_TYPE_DESTROY) {
+        if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+        msg->key = atoi(buffer);
     }
 
-    msg->cmd = cmd->valueint;
-    msg->sender_tid = sender_tid->valuedouble;
-    msg->type = type->valueint;
+    // values (only set and destroy)
+    if (msg->cmd == CMD_TYPE_SET || msg->cmd == CMD_TYPE_MODIFY) {
+        if (read_line(socket, msg->value1, sizeof(msg->value1)) <= 0) return -1;
 
-    cJSON *key = (msg->cmd != CMD_TYPE_DESTROY) ? cJSON_GetObjectItem(json, "key") : NULL;
-    int unpack_values = (msg->cmd == CMD_TYPE_SET || msg->cmd == CMD_TYPE_MODIFY);
-    cJSON *value1 = unpack_values ? cJSON_GetObjectItem(json, "value1") : NULL;
-    cJSON *N_value2 = unpack_values ? cJSON_GetObjectItem(json, "N_value2") : NULL;
-    cJSON *V_value2 = unpack_values ? cJSON_GetObjectItem(json, "V_value2") : NULL;
-    cJSON *value3 = unpack_values ? cJSON_GetObjectItem(json, "value3") : NULL;
+        if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+        msg->N_value2 = atoi(buffer);
 
-    if ((msg->cmd != CMD_TYPE_DESTROY && !key) ||
-        unpack_values && (!value1 || !N_value2 || !V_value2 || !value3)) {
-        cJSON_Delete(json);
-        return -1;
-    }
-
-    if (key) {
-        msg->key = key->valueint;
-    }
-    
-    if (value1) {
-        strncpy(msg->value1, value1->valuestring, sizeof(msg->value1) - 1);
-        msg->value1[sizeof(msg->value1) - 1] = '\0';
-    }
-
-    if (N_value2) {
-        msg->N_value2 = N_value2->valueint;
         for (int i = 0; i < msg->N_value2 && i < 32; i++) {
-            cJSON *item = cJSON_GetArrayItem(V_value2, i);
-            if (item) {
-                msg->V_value2[i] = item->valuedouble;
-            }
+            if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+            msg->V_value2[i] = strtod(buffer, NULL);
         }
+
+        if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+        msg->value3.x = atoi(buffer);
+
+        if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+        msg->value3.y = atoi(buffer);
     }
 
-    if (value3) {
-        cJSON *x = cJSON_GetObjectItem(value3, "x");
-        cJSON *y = cJSON_GetObjectItem(value3, "y");
-        if (x && y) {
-            msg->value3.x = x->valuedouble;
-            msg->value3.y = y->valuedouble;
-        }
-    }
-    
-    cJSON_Delete(json);
     return 0;
 }
+
+
 
 message_t get_response(message_t *msg) {
     message_t response;
@@ -175,60 +226,40 @@ message_t get_response(message_t *msg) {
 
 // Function to handle client requests
 void *handle_request(void *arg) {
-
     int client_sock;
+
+    // Synchronization: Mark thread as busy and get client socket
     pthread_mutex_lock(&m);
     busy = 0;
-    client_sock = (* (int *) arg);
+    client_sock = *((int *)arg);
     pthread_cond_signal(&c);
     pthread_mutex_unlock(&m);
-    
-    char buffer[BUFFER_SIZE];
-    
-    // Receive JSON message from the client
-    int recv_len = recv(client_sock, buffer, sizeof(buffer), 0);
-    if (recv_len < 0) {
-        perror("recv");
-        close(client_sock);
-        return NULL;
-    }
-    buffer[recv_len] = '\0';
 
-    // Parse the received JSON message
-    cJSON *json = cJSON_Parse(buffer);
-    if (!json) {
-        perror("JSON parsing failed");
-        close(client_sock);
-        return NULL;
-    }
-
-    // Convert JSON to message_t structure
+    // Receive the request
     message_t msg;
-    char *json_str = cJSON_PrintUnformatted(json);
-    unpack_request(json_str, &msg);
-    free(json_str);
-    cJSON_Delete(json); // Free the JSON object
+    if (unpack_request(client_sock, &msg) < 0) {
+        fprintf(stderr, "Error: Failed to unpack request\n");
+        close(client_sock);
+        return NULL;
+    }
 
     // Handle the request
     message_t response = get_response(&msg);
     response.type = MSG_TYPE_RESPONSE;
+
+    // Print messages for debugging (if VERBOSE is enabled)
     print_msg(&msg, VERBOSE);
     print_msg(&response, VERBOSE);
     fflush(stdout);
 
-    // Convert the response message to JSON
-    char *response_json = pack_response(&response);
+    // Send the response
+    pack_response(client_sock, &response);
 
-    // Send the response JSON back to the client
-    if (send(client_sock, response_json, strlen(response_json), 0) < 0) {
-        perror("send");
-    }
-
-    free(response_json);
     close(client_sock);
     pthread_exit(NULL);
     return NULL;
 }
+
 
 
 int main(int argc, char *argv[]) {

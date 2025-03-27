@@ -1,4 +1,5 @@
 #include <sys/socket.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -7,235 +8,242 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include <cjson/cJSON.h>
 #include "claves.h"
 
-char *pack_request(const message_t *msg) {
-    if (!msg) return NULL;
-
-    cJSON *json = cJSON_CreateObject();
-    if (!json) return NULL;
-
-    // always
-    cJSON_AddNumberToObject(json, "cmd", msg->cmd);
-    cJSON_AddNumberToObject(json, "sender_tid", msg->sender_tid);
-    cJSON_AddNumberToObject(json, "type", msg->type);
-    
-    // no key on destroy
-    if (msg->cmd != CMD_TYPE_DESTROY) {
-        cJSON_AddNumberToObject(json, "key", msg->key);
-    }
-    
-    // only values on set and modify
-    if (msg->cmd == CMD_TYPE_SET || msg->cmd == CMD_TYPE_MODIFY) {
-        cJSON_AddStringToObject(json, "value1", msg->value1);
-        cJSON_AddNumberToObject(json, "N_value2", msg->N_value2);
-
-        cJSON *array = cJSON_CreateArray();
-        if (!array) {
-            cJSON_Delete(json);
-            return NULL;
-        }
-        for (int i = 0; i < msg->N_value2; i++) {
-            cJSON_AddItemToArray(array, cJSON_CreateNumber(msg->V_value2[i]));
-        }
-        cJSON_AddItemToObject(json, "V_value2", array);
-
-        cJSON *coord = cJSON_CreateObject();
-        if (!coord) {
-            cJSON_Delete(json);
-            return NULL;
-        }
-        cJSON_AddNumberToObject(coord, "x", msg->value3.x);
-        cJSON_AddNumberToObject(coord, "y", msg->value3.y);
-        cJSON_AddItemToObject(json, "value3", coord);
-    }
-
-    char *json_str = cJSON_PrintUnformatted(json);
-    cJSON_Delete(json);
-
-    return json_str;
+ssize_t send_message(int fd, const void *buffer, size_t n) {
+    if (!buffer || n == 0) return -1;
+    return write(fd, buffer, n);
 }
 
-int unpack_response(const char *json_str, message_t *msg) {
-    if (!json_str || !msg) return -1;
+ssize_t read_line(int fd, void *buffer, size_t n) {
+    ssize_t numRead; /* Number of bytes fetched by last read() */
+    size_t totRead;   /* Total bytes read so far */
+    char *buf;
+    char ch;
 
-    cJSON *json = cJSON_Parse(json_str);
-    if (!json) return -1;
-
-    cJSON *cmd = cJSON_GetObjectItem(json, "cmd");
-    cJSON *result = cJSON_GetObjectItem(json, "result");
-    cJSON *sender_tid = cJSON_GetObjectItem(json, "sender_tid");
-    cJSON *type = cJSON_GetObjectItem(json, "type");
-
-    if (!cmd || !sender_tid || !result || !type) {
-        cJSON_Delete(json);
+    /* Check for invalid input */
+    if (n <= 0 || buffer == NULL) {
+        errno = EINVAL;
         return -1;
     }
 
-    msg->cmd = cmd->valueint;
-    msg->result = result->valueint;
-    msg->sender_tid = sender_tid->valuedouble;
-    msg->type = type->valueint;
+    buf = buffer;
+    totRead = 0;
 
-    int unpack_values = (msg->cmd == CMD_TYPE_GET && msg->result == 0);
-    cJSON *key = unpack_values ? cJSON_GetObjectItem(json, "key") : NULL;
-    cJSON *value1 = unpack_values ? cJSON_GetObjectItem(json, "value1") : NULL;
-    cJSON *N_value2 = unpack_values ? cJSON_GetObjectItem(json, "N_value2") : NULL;
-    cJSON *V_value2 = unpack_values ? cJSON_GetObjectItem(json, "V_value2") : NULL;
-    cJSON *value3 = unpack_values ? cJSON_GetObjectItem(json, "value3") : NULL;
-    
-    if (unpack_values && (!key || !value1 || !N_value2 || !V_value2 || !value3)) {
-        cJSON_Delete(json);
-        return -1;
-    }
+    /* Loop to read characters until newline, null terminator, EOF, or error */
+    for (;;) {
+        numRead = read(fd, &ch, 1); /* Read a single byte */
 
-    
-    if (key) {
-        msg->key = key->valueint;
-    }
-    
-    if (value1) {
-        strncpy(msg->value1, value1->valuestring, sizeof(msg->value1) - 1);
-        msg->value1[sizeof(msg->value1) - 1] = '\0';
-    }
-
-    if (N_value2) {
-        msg->N_value2 = N_value2->valueint;
-        for (int i = 0; i < msg->N_value2 && i < 32; i++) {
-            cJSON *item = cJSON_GetArrayItem(V_value2, i);
-            if (item) {
-                msg->V_value2[i] = item->valuedouble;
+        if (numRead == -1) {
+            /* Error occurred during read */
+            if (errno == EINTR) {
+                /* Interrupted system call, retry read */
+                continue;
+            } else {
+                /* Other error, return -1 */
+                return -1;
             }
+        } else if (numRead == 0) {
+            /* End of file (EOF) reached */
+            if (totRead == 0) {
+                /* No bytes read before EOF, return 0 */
+                return 0;
+            } else {
+                /* Bytes read before EOF, break out of the loop */
+                break;
+            }
+        } else {
+            /* Successfully read one byte */
+            if (ch == '\n' || ch == '\0') {
+                /* Newline or null terminator encountered, break out of the loop */
+                break;
+            }
+
+            /* Check if buffer has space for the character */
+            if (totRead < n - 1) {
+                /* Store the character in the buffer */
+                totRead++;
+                *buf++ = ch;
+            }
+            /* If totRead >= n-1, the character is discarded */
         }
     }
 
-    if (value3) {
-        cJSON *x = cJSON_GetObjectItem(value3, "x");
-        cJSON *y = cJSON_GetObjectItem(value3, "y");
-        if (x && y) {
-            msg->value3.x = x->valuedouble;
-            msg->value3.y = y->valuedouble;
+    /* Null-terminate the buffer */
+    *buf = '\0';
+
+    /* Return the total number of bytes read */
+    return totRead;
+}
+
+
+void pack_request(int socket, const message_t *msg) {
+    if (!msg) return;
+
+    char buffer[256];
+
+    // command
+    sprintf(buffer, "%d", msg->cmd);
+    send_message(socket, buffer, strlen(buffer) + 1);
+
+    // sender_tid
+    sprintf(buffer, "%lu", msg->sender_tid);
+    send_message(socket, buffer, strlen(buffer) + 1);
+
+    // type
+    sprintf(buffer, "%d", msg->type);
+    send_message(socket, buffer, strlen(buffer) + 1);
+
+    // key (if not destroy)
+    if (msg->cmd != CMD_TYPE_DESTROY) {
+        sprintf(buffer, "%d", msg->key);
+        send_message(socket, buffer, strlen(buffer) + 1);
+    }
+
+    // values (only on set and destroy)
+    if (msg->cmd == CMD_TYPE_SET || msg->cmd == CMD_TYPE_MODIFY) {
+        send_message(socket, msg->value1, strlen(msg->value1) + 1);
+
+        sprintf(buffer, "%d", msg->N_value2);
+        send_message(socket, buffer, strlen(buffer) + 1);
+
+        for (int i = 0; i < msg->N_value2; i++) {
+            sprintf(buffer, "%f", msg->V_value2[i]);
+            send_message(socket, buffer, strlen(buffer) + 1);
         }
+
+        sprintf(buffer, "%d", msg->value3.x);
+        send_message(socket, buffer, strlen(buffer) + 1);
+        sprintf(buffer, "%d", msg->value3.y);
+        send_message(socket, buffer, strlen(buffer) + 1);
+    }
+}
+
+int unpack_response(int socket, message_t *msg) {
+    if (!msg) return -1;
+
+    char buffer[256];
+
+    // command
+    if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+    msg->cmd = atoi(buffer);
+
+    // result
+    if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+    msg->result = atoi(buffer);
+
+    // sender_tid
+    if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+    msg->sender_tid = strtoul(buffer, NULL, 10);
+
+    // type
+    if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+    msg->type = atoi(buffer);
+
+    // values only if get command
+    if (msg->cmd == CMD_TYPE_GET && msg->result == 0) {
+        if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+        msg->key = atoi(buffer);
+
+        if (read_line(socket, msg->value1, sizeof(msg->value1)) <= 0) return -1;
+
+        if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+        msg->N_value2 = atoi(buffer);
+
+        for (int i = 0; i < msg->N_value2 && i < 32; i++) {
+            if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+            msg->V_value2[i] = strtod(buffer, NULL);
+        }
+
+        if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+        msg->value3.x = atoi(buffer);
+
+        if (read_line(socket, buffer, sizeof(buffer)) <= 0) return -1;
+        msg->value3.y = atoi(buffer);
     }
 
-    cJSON_Delete(json);
     return 0;
 }
 
 
-int send_request(int sock, const char *json_str) {
-    size_t len = strlen(json_str);
-    ssize_t sent = send(sock, json_str, len, 0);
-    if (sent < 0) {
-        perror("send");
-        return -1;
-    }
-    return 0;
-}
-
-int receive_response(int sock, char *buffer, size_t buffer_size) {
-    memset(buffer, 0, buffer_size);
-    ssize_t received = recv(sock, buffer, buffer_size - 1, 0);
-    if (received <= 0) {
-        perror("recv");
-        return -1;
-    }
-    buffer[received] = '\0'; // Null-terminate the received string
-    return 0;
-}
 
 int make_request(message_t *msg) {
-
-    // get parameters for connection
+    // Connection params
     const char *server_ip = getenv("IP_TUPLAS");
     const char *server_port_str = getenv("PORT_TUPLAS");
     if (!server_ip || !server_port_str) {
-        fprintf(stderr, "Error: env var not set\n");
+        fprintf(stderr, "Error: Environment variable not set\n");
         return -2;
     }
+
     int server_port = atoi(server_port_str);
     if (server_port <= 0) {
         fprintf(stderr, "Error: Invalid PORT_TUPLAS\n");
         return -2;
     }
 
-    // to JSON
+    // Prepare request message
     msg->sender_tid = pthread_self();
     msg->type = MSG_TYPE_REQUEST;
-    char *json_str = pack_request(msg);
-    if (!json_str) {
-        fprintf(stderr, "Error: Failed to convert message to JSON\n");
-        return -2;
-    }
 
-    // Connecto to server
+    // Create socket
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("socket");
-        free(json_str);
         return -2;
     }
 
     struct sockaddr_in server_addr;
-    struct hostent *hp;
-    hp = gethostbyname(server_ip);
-    if (NULL == hp) {
+    struct hostent *hp = gethostbyname(server_ip);
+    if (!hp) {
         perror("gethostbyname");
-        return -1 ;
+        close(sock);
+        return -2;
     }
-    bzero((char *)&server_addr, sizeof(server_addr));
-    memcpy (&(server_addr.sin_addr), hp->h_addr, hp->h_length);
+
+    memset(&server_addr, 0, sizeof(server_addr));
+    memcpy(&server_addr.sin_addr, hp->h_addr, hp->h_length);
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(server_port);
 
+    // Connect to server
     if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("connect");
         close(sock);
-        free(json_str);
         return -2;
     }
 
-    // SEND
-    if (send_request(sock, json_str) < 0) {
-        close(sock);
-        free(json_str);
-        return -2;
-    }
-    free(json_str);
+    // send
+    pack_request(sock, msg);
 
-    // RECEIVE
-    char buffer[BUFFER_SIZE];
-    if (receive_response(sock, buffer, BUFFER_SIZE) < 0) {
-        close(sock);
-        return -2;
-    }
-    close(sock);
-    // to struct
+    // receive
     message_t response_msg;
-    if (unpack_response(buffer, &response_msg) < 0) {
-        perror("Error: Invalid JSON response received\n");
+    if (unpack_response(sock, &response_msg) < 0) {
+        close(sock);
         return -2;
     }
 
-    // check if its the correct one
+    close(sock);
+
+    // verify response
     if (response_msg.sender_tid != msg->sender_tid) {
-        fprintf(stderr, "Got response to another request\n");
+        fprintf(stderr, "Received response for another request\n");
         return -2;
     }
 
-    // overwrite on get
+    // copy results if it was a get command
     msg->result = response_msg.result;
-    if (msg->cmd == CMD_TYPE_GET) {
+    if (msg->cmd == CMD_TYPE_GET && msg->result == 0) {
         strncpy(msg->value1, response_msg.value1, sizeof(msg->value1) - 1);
+        msg->value1[sizeof(msg->value1) - 1] = '\0';
         msg->N_value2 = response_msg.N_value2;
         memcpy(msg->V_value2, response_msg.V_value2, sizeof(msg->V_value2));
         msg->value3 = response_msg.value3;
     }
-    
+
     return msg->result;
 }
+
 
 int destroy() {
     message_t msg = {
