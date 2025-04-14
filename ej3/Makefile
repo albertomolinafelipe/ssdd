@@ -23,7 +23,6 @@ $(BUILD_DIR):
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
-# Generación de archivos RPC (main en .svc, lógica en tu .c)
 rpcgen: clean-rpc
 	rpcgen -M -N $(RPC_X)
 
@@ -48,10 +47,8 @@ $(LIBCLAVES): $(BUILD_DIR)/proxy-rpc.o $(BUILD_DIR)/claves_rpc_clnt.o $(BUILD_DI
 $(CLIENTE_BIN): app-cliente.c claves.h $(LIBCLAVES) | $(BIN_DIR)
 	$(CC) $(CFLAGS) $< -o $@ -L$(BUILD_DIR) -lclaves -Wl,-rpath=$(BUILD_DIR)
 
-# Servidor (usa main de .svc y lógica en servidor-rpc.c)
 $(SERVIDOR_BIN): claves.c servidor-rpc.c claves_rpc_svc.c claves_rpc_xdr.c claves_rpc_clnt.c claves_rpc.h | $(BIN_DIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-# Limpieza
 clean: clean-rpc
 	rm -rf $(BUILD_DIR) $(BIN_DIR)

@@ -25,6 +25,7 @@ bool_t get_value_rpc_1_svc(int key, get_value_respuesta *result, struct svc_req 
 
     result->status = get_value(key, buffer, &n, temp, &c);
 
+    // rellenar valores
     if (result->status != 0) {
         result->value1 = strdup("");
         result->N_value2 = 0;
@@ -66,8 +67,7 @@ bool_t delete_rpc_1_svc(int key, int *result, struct svc_req *rqstp) {
 }
 
 
-int claves_1_freeresult (SVCXPRT *transp, xdrproc_t xdr_result, caddr_t result)
-{
+int claves_1_freeresult (SVCXPRT *transp, xdrproc_t xdr_result, caddr_t result) {
 	xdr_free (xdr_result, result);
 
 	return 1;
