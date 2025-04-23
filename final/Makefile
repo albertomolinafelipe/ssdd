@@ -2,10 +2,12 @@ CC = gcc
 CFLAGS = -Wall -pthread
 BINDIR = bin
 TARGET = server
+SRCS = server.c db.c
+OBJS = $(SRCS:.c=.o)
 
-$(BINDIR)/$(TARGET): server.c
+$(BINDIR)/$(TARGET): $(SRCS)
 	mkdir -p $(BINDIR)
-	$(CC) $(CFLAGS) -o $(BINDIR)/$(TARGET) server.c
+	$(CC) $(CFLAGS) -o $(BINDIR)/$(TARGET) $(SRCS)
 
 all: $(BINDIR)/$(TARGET)
 

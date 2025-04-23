@@ -1,6 +1,7 @@
 from enum import Enum
 import argparse
 import socket
+import threading
 
 class client :
 
@@ -15,15 +16,44 @@ class client :
     # ****************** ATTRIBUTES ******************
     _server = None
     _port = -1
+    _listen_socket = None
+    _listen_port = None
+    _listen_thread = None
+
+    # ******************** UTILITIES *****************
+    @staticmethod
+    def find_free_port():
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('', 0))
+        port = s.getsockname()[1]
+        s.close()
+        return port
+
+    @staticmethod
+    def _find_free_port():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as temp_sock:
+            temp_sock.bind(('', 0))
+            return temp_sock.getsockname()[1]
+
+    @staticmethod
+    def _listen_thread_func():
+        while True:
+            try:
+                conn, addr = client._listen_socket.accept()
+                print(f"c> Incoming connection from {addr}")
+                # TODO: Here you'd handle GET_FILE requests from other clients.
+                conn.close()
+            except Exception as e:
+                print(f"c> Listen thread stopped: {e}")
+                break
 
     # ******************** METHODS *******************
     @staticmethod
-    def dummy():
-        dummy = "42"
+    def register(user) :
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
-                s.sendall(b'REGISTER\0' + dummy.encode() + b'\0')
+                s.sendall(b'REGISTER\0' + user.encode() + b'\0')
                 result = s.recv(1)
                 if result == b'\x00':
                     print("c> REGISTER OK")
@@ -35,23 +65,66 @@ class client :
             print(f"c> REGISTER FAIL {e}")
             return client.RC.ERROR
 
-    @staticmethod
-    def  register(user) :
-        #  Write your code here
-        return client.RC.ERROR
-
    
     @staticmethod
     def  unregister(user) :
-        #  Write your code here
-        return client.RC.ERROR
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((client._server, client._port))
+                s.sendall(b'UNREGISTER\0' + user.encode() + b'\0')
+                result = s.recv(1)
+                if result == b'\x00':
+                    print("c> UNREGISTER OK")
+                    return client.RC.OK
+                else:
+                    print("c> UNREGISTER FAIL")
+                    return client.RC.ERROR
+        except Exception as e:
+            print(f"c> UNREGISTER FAIL {e}")
+            return client.RC.ERROR
 
 
     
+
     @staticmethod
-    def  connect(user) :
-        #  Write your code here
+    def connect(user):
+        try:
+            # 1. Buscar puerto libre y crear socket de escucha
+            client._listen_port = client._find_free_port()
+            client._listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client._listen_socket.bind(('', client._listen_port))
+            client._listen_socket.listen(5)
+
+            # 2. Lanzar hilo de escucha
+            client._listen_thread = threading.Thread(target=client._listen_thread_func, daemon=True)
+            client._listen_thread.start()
+
+            # 3. Conectarse al servidor y enviar CONNECT
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((client._server, client._port))
+                s.sendall(b'CONNECT\0' + user.encode() + b'\0' + str(client._listen_port).encode() + b'\0')
+                result = s.recv(1)
+
+                if result == b'\x00':
+                    print("c> CONNECT OK")
+                    return client.RC.OK
+                elif result == b'\x01':
+                    print("c> CONNECT FAIL, USER DOES NOT EXIST")
+                elif result == b'\x02':
+                    print("c> USER ALREADY CONNECTED")
+                else:
+                    print("c> CONNECT FAIL")
+
+        except Exception as e:
+            print(f"c> CONNECT FAIL {e}")
+
+        # Si algo falla, cerrar el socket y el hilo
+        if client._listen_socket:
+            client._listen_socket.close()
+            client._listen_socket = None
+        client._listen_thread = None
         return client.RC.ERROR
+
 
 
     
@@ -160,9 +233,6 @@ class client :
                             break
                         else :
                             print("Syntax error. Use: QUIT")
-                    
-                    elif(line[0]=="DUMMY") :
-                        client.dummy()
                     else :
                         print("Error: command " + line[0] + " not valid.")
             except Exception as e:
