@@ -6,13 +6,6 @@
 
 #define USERNAME_MAX 256
 
-typedef struct user_entry {
-    char username[USERNAME_MAX];
-    int connected;
-    int listening_port;
-    struct user_entry* next;
-} user_entry_t;
-
 static user_entry_t* user_list = NULL;
 static pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -105,4 +98,84 @@ int db_connect_user(const char* username, int port) {
     return 1;
 }
 
+int db_disconnect_user(const char* username) {
+    pthread_mutex_lock(&db_mutex);
+
+    user_entry_t* current = user_list;
+    while (current) {
+        if (strcmp(current->username, username) == 0) {
+            if (!current->connected) {
+                pthread_mutex_unlock(&db_mutex);
+                return 2;
+            }
+            current->connected = 0;
+            pthread_mutex_unlock(&db_mutex);
+            return 0;
+        }
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&db_mutex);
+    return 1;
+}
+
+
+int db_list_connected_users(const char* username, user_entry_t*** connected_users_out, int* count_out) {
+    pthread_mutex_lock(&db_mutex);
+
+    user_entry_t* current = user_list;
+    int found = 0;
+    int is_connected = 0;
+
+    // Comprobar si el usuario que solicita existe y está conectado
+    while (current) {
+        if (strcmp(current->username, username) == 0) {
+            found = 1;
+            is_connected = current->connected;
+            break;
+        }
+        current = current->next;
+    }
+
+    if (!found) {
+        pthread_mutex_unlock(&db_mutex);
+        return 1;  // USER DOES NOT EXIST
+    }
+    if (!is_connected) {
+        pthread_mutex_unlock(&db_mutex);
+        return 2;  // USER NOT CONNECTED
+    }
+
+    // Contar usuarios conectados
+    int count = 0;
+    current = user_list;
+    while (current) {
+        if (current->connected) {
+            count++;
+        }
+        current = current->next;
+    }
+
+    // Crear array dinámico de punteros a user_entry_t conectados
+    user_entry_t** connected_users = malloc(count * sizeof(user_entry_t*));
+    if (!connected_users) {
+        pthread_mutex_unlock(&db_mutex);
+        return 3;  // Memory error
+    }
+
+    int idx = 0;
+    current = user_list;
+    while (current) {
+        if (current->connected) {
+            connected_users[idx++] = current;
+        }
+        current = current->next;
+    }
+
+    *connected_users_out = connected_users;
+    *count_out = count;
+
+    pthread_mutex_unlock(&db_mutex);
+    return 0;  // OK
+}
 

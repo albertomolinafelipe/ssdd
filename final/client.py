@@ -19,6 +19,7 @@ class client :
     _listen_socket = None
     _listen_port = None
     _listen_thread = None
+    _current_user = ""
 
     # ******************** UTILITIES *****************
     @staticmethod
@@ -46,6 +47,18 @@ class client :
             except Exception as e:
                 print(f"c> Listen thread stopped: {e}")
                 break
+    @staticmethod
+    def _recv_string(sock):
+        """Recibe una cadena terminada en '\0' desde el socket."""
+        data = b""
+        while True:
+            byte = sock.recv(1)
+            if not byte:
+                raise ConnectionError("Socket closed unexpectedly while receiving string")
+            if byte == b'\0':
+                break
+            data += byte
+        return data.decode()
 
     # ******************** METHODS *******************
     @staticmethod
@@ -83,31 +96,29 @@ class client :
             print(f"c> UNREGISTER FAIL {e}")
             return client.RC.ERROR
 
-
-    
-
     @staticmethod
     def connect(user):
         try:
-            # 1. Buscar puerto libre y crear socket de escucha
-            client._listen_port = client._find_free_port()
-            client._listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client._listen_socket.bind(('', client._listen_port))
-            client._listen_socket.listen(5)
+            listen_port = client._find_free_port()
 
-            # 2. Lanzar hilo de escucha
-            client._listen_thread = threading.Thread(target=client._listen_thread_func, daemon=True)
-            client._listen_thread.start()
-
-            # 3. Conectarse al servidor y enviar CONNECT
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
-                s.sendall(b'CONNECT\0' + user.encode() + b'\0' + str(client._listen_port).encode() + b'\0')
+                s.sendall(b'CONNECT\0' + user.encode() + b'\0' + str(listen_port).encode() + b'\0')
                 result = s.recv(1)
 
-                if result == b'\x00':
+                if result == b'\x00': 
+                    client._listen_port = listen_port
+                    client._listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    client._listen_socket.bind(('', client._listen_port))
+                    client._listen_socket.listen(5)
+                    client._current_user = user
+
+                    client._listen_thread = threading.Thread(target=client._listen_thread_func, daemon=True)
+                    client._listen_thread.start()
+
                     print("c> CONNECT OK")
                     return client.RC.OK
+
                 elif result == b'\x01':
                     print("c> CONNECT FAIL, USER DOES NOT EXIST")
                 elif result == b'\x02':
@@ -118,19 +129,54 @@ class client :
         except Exception as e:
             print(f"c> CONNECT FAIL {e}")
 
-        # Si algo falla, cerrar el socket y el hilo
         if client._listen_socket:
             client._listen_socket.close()
             client._listen_socket = None
         client._listen_thread = None
         return client.RC.ERROR
 
-
-
-    
     @staticmethod
-    def  disconnect(user) :
-        #  Write your code here
+    def disconnect(user):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((client._server, client._port))
+                s.sendall(b'DISCONNECT\0' + user.encode() + b'\0')
+                result = s.recv(1)
+
+                if result == b'\x00':  # OK, cerramos el hilo y el socket de escucha
+                    print("c> DISCONNECT OK")
+
+                    if client._listen_socket:
+                        client._listen_socket.close()
+                        client._listen_socket = None
+
+                    client._listen_thread = None
+                    client._listen_port = None
+                    if client._current_user == user:
+                        client._current_user = ""
+
+                    return client.RC.OK
+
+                elif result == b'\x01':
+                    print("c> DISCONNECT FAIL, USER DOES NOT EXIST")
+                    return client.RC.USER_ERROR
+                elif result == b'\x02':
+                    print("c> DISCONNECT FAIL, USER NOT CONNECTED")
+                    return client.RC.USER_ERROR
+                else:
+                    print("c> DISCONNECT FAIL")
+                    return client.RC.ERROR
+
+        except Exception as e:
+            print(f"c> DISCONNECT FAIL {e}")
+            return client.RC.ERROR
+
+        # Cleanup por si acaso (aunque debería estar cerrado ya)
+        if client._listen_socket is not None:
+            client._listen_socket.close()
+            client._listen_socket = None
+        client._listen_thread = None
+        client._listen_port = None
         return client.RC.ERROR
 
     @staticmethod
@@ -143,10 +189,45 @@ class client :
         #  Write your code here
         return client.RC.ERROR
 
+
     @staticmethod
-    def  listusers() :
-        #  Write your code here
-        return client.RC.ERROR
+    def listusers():
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((client._server, client._port))
+                s.sendall(b'LIST_USERS\0' + client._current_user.encode() + b'\0')
+                result = s.recv(1)
+
+                if result == b'\x00':
+                    # Recibir el número de usuarios (como cadena terminada en '\0')
+                    num_users = client._recv_string(s)
+                    count = int(num_users)
+                    print("c> LIST_USERS OK")
+
+                    for _ in range(count):
+                        username = client._recv_string(s)
+                        ip = client._recv_string(s)
+                        port = client._recv_string(s)
+                        print(f"\t{username} {ip} {port}")
+
+                    return client.RC.OK
+
+                elif result == b'\x01':
+                    print("c> LIST_USERS FAIL, USER DOES NOT EXIST")
+                    return client.RC.USER_ERROR
+                elif result == b'\x02':
+                    print("c> LIST_USERS FAIL, USER NOT CONNECTED")
+                    return client.RC.USER_ERROR
+                else:
+                    print("c> LIST_USERS FAIL")
+                    return client.RC.ERROR
+
+        except Exception as e:
+            print(f"c> LIST_USERS FAIL {e}")
+            return client.RC.ERROR
+
+
+
 
     @staticmethod
     def  listcontent(user) :
