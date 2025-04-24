@@ -1,0 +1,4 @@
+REGISTER USER_2
+CONNECT USER_2
+LIST_USERS
+GET_FILE USER_1 test_data/top_secret_file.gov test_data/my_copy.gov

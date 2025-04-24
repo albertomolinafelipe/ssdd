@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p2p-server
+    networks:
+      - my-network
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: bash -c "make clean && make &&./bin/server -p 6677"
+
+  client1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: client1
+    networks:
+      - my-network
+    working_dir: /app
+    volumes:
+      - .:/app
+    depends_on:
+      - server
+    command: bash -c "cat test_data/commands1.txt | python3 client.py -s p2p-server -p 6677"
+
+  client2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: client2
+    networks:
+      - my-network
+    working_dir: /app
+    volumes:
+      - .:/app
+    depends_on:
+      - client1
+    command: bash -c "cat test_data/commands2.txt | python3 client.py -s p2p-server -p 6677 && cat test_data/my_copy.gov"
+
+networks:
+  my-network:
+    driver: bridge
+

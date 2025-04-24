@@ -1,0 +1,3 @@
+REGISTER USER_1
+CONNECT USER_1
+PUBLISH test_data/top_secret_file.gov Truco del almendruco

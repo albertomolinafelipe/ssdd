@@ -1,41 +1,109 @@
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <pthread.h>
 #include "db.h"
+#include "server.h"
 
-#define BACKLOG 10
-#define BUF_SIZE 512
+int VERBOSE = 0;
 
-struct client_info {
-    int client_fd;
-    struct sockaddr_in client_addr;
-};
+void printf_debug(const char* format, ...) {
+    if (VERBOSE) {
+        va_list args;
+        va_start(args, format);
+        printf("\033[0;32m\t");
+        vprintf(format, args);
+        printf("\033[0m");   
+        va_end(args);
+    }
+}
 
-void* handle_client(void* arg);
-void register_handler(int client_fd, const char* username);
-void unregister_handler(int client_fd, const char* username);
-void connect_handler(int client_fd, const char* buffer, const char* client_ip);
-void disconnect_handler(int client_fd, const char* username);
-void publish_handler(int client_fd, const char* buffer);
-void delete_handler(int client_fd, const char* buffer) ;
-void list_users_handler(int client_fd, const char* username) ;
-void list_content_handler(int client_fd, const char* buffer) ;
+void* handle_client(void* arg) {
+
+    // Extraer argumentos
+    struct client_info* info = (struct client_info*)arg;
+    int client_fd = info->client_fd;
+    struct sockaddr_in client_addr = info->client_addr;
+    free(info);
+
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
+
+    // Tratar cada comando
+    char buffer[BUF_SIZE];
+    int bytes_read = recv(client_fd, buffer, BUF_SIZE - 1, 0);
+    if (bytes_read > 0) {
+        buffer[bytes_read] = '\0';
+
+        if (strncmp(buffer, "REGISTER", strlen("REGISTER")) == 0) {
+            register_handler(client_fd, buffer);
+
+        } else if (strncmp(buffer, "UNREGISTER", strlen("UNREGISTER")) == 0) {
+            unregister_handler(client_fd, buffer);
+
+        } else if (strncmp(buffer, "CONNECT", strlen("CONNECT")) == 0) {
+            connect_handler(client_fd, buffer, client_ip);
+
+        } else if (strncmp(buffer, "DISCONNECT", strlen("DISCONNECT")) == 0) {
+            disconnect_handler(client_fd, buffer);
+
+        } else if (strncmp(buffer, "PUBLISH", strlen("PUBLISH")) == 0) {
+            publish_handler(client_fd, buffer);
+
+        } else if (strncmp(buffer, "DELETE", strlen("DELETE")) == 0) {
+            delete_handler(client_fd, buffer);
+
+        } else if (strncmp(buffer, "LIST_USERS", strlen("LIST_USERS")) == 0) {
+            list_users_handler(client_fd, buffer);
+
+        } else if (strncmp(buffer, "LIST_CONTENT", strlen("LIST_CONTENT")) == 0) {
+            list_content_handler(client_fd, buffer);
+
+        } else {
+            printf("s> unknown operation\n");
+        }
+    }
+
+    close(client_fd);
+    pthread_exit(NULL);
+}
+
 
 int main(int argc, char* argv[]) {
-    if (argc != 3 || strcmp(argv[1], "-p") != 0) {
-        fprintf(stderr, "uso: %s -p <puerto>\n", argv[0]);
+    int port;
+    if (argc < 3) {
+        fprintf(stderr, "uso: %s [-v] -p <puerto>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    int port = atoi(argv[2]);
+    // Parsear argumentos -v, -p
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-v") == 0) {
+            VERBOSE = 1;
+        } else if (strcmp(argv[i], "-p") == 0) {
+            if (i + 1 < argc) {
+                port = atoi(argv[i + 1]);
+                i++;
+            } else {
+                fprintf(stderr, "error: falta el número de puerto después de -p\n");
+                exit(EXIT_FAILURE);
+            }
+        } else {
+            fprintf(stderr, "uso: %s [-v] -p <puerto>\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+    }
+
     int server_fd;
     struct sockaddr_in server_addr;
-
+    
+    // Inicializar db
     db_init();
 
+    // Socket TCP
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
         perror("socket");
@@ -45,6 +113,7 @@ int main(int argc, char* argv[]) {
     int optval = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int));
 
+    // Configurar dirección del servidor
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
     server_addr.sin_addr.s_addr = INADDR_ANY;
@@ -65,6 +134,7 @@ int main(int argc, char* argv[]) {
     printf("s> init server 0.0.0.0:%d\n", port);
     printf("s>\n");
 
+    // Bucle multihilo
     while (1) {
         struct sockaddr_in client_addr;
         socklen_t sin_size = sizeof(struct sockaddr_in);
@@ -87,182 +157,107 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-void* handle_client(void* arg) {
-    struct client_info* info = (struct client_info*)arg;
-    int client_fd = info->client_fd;
-    struct sockaddr_in client_addr = info->client_addr;
-    free(info);
 
-    char client_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
+// ================== HANDLERS ====================
 
-    char buffer[BUF_SIZE];
-    int bytes_read = recv(client_fd, buffer, BUF_SIZE - 1, 0);
-    if (bytes_read > 0) {
-        buffer[bytes_read] = '\0';
 
-        if (strncmp(buffer, "REGISTER", 8) == 0) {
-            char* username = buffer + strlen("REGISTER") + 1;
-            register_handler(client_fd, username);
-
-        } else if (strncmp(buffer, "UNREGISTER", 10) == 0) {
-            char* username = buffer + strlen("UNREGISTER") + 1;
-            unregister_handler(client_fd, username);
-
-        } else if (strncmp(buffer, "CONNECT", 7) == 0) {
-            connect_handler(client_fd, buffer, client_ip);
-
-        } else if (strncmp(buffer, "DISCONNECT", 10) == 0) {
-            char* username = buffer + strlen("DISCONNECT") + 1;
-            disconnect_handler(client_fd, username);
-
-        } else if (strncmp(buffer, "PUBLISH", 7) == 0) {
-            publish_handler(client_fd, buffer);
-
-        } else if (strncmp(buffer, "DELETE", 6) == 0) {
-            delete_handler(client_fd, buffer);
-
-        } else if (strncmp(buffer, "LIST_USERS", 10) == 0) {
-            char* username = buffer + strlen("LIST_USERS") + 1;
-            list_users_handler(client_fd, username);
-
-        } else if (strncmp(buffer, "LIST_CONTENT", 12) == 0) {
-            list_content_handler(client_fd, buffer);
-
-        } else {
-            printf("s> unknown operation\n");
-        }
-    }
-
-    close(client_fd);
-    pthread_exit(NULL);
-}
-
-void register_handler(int client_fd, const char* username) {
+void register_handler(int client_fd, const char* buffer) {
+    const char* username = buffer + strlen("REGISTER") + 1;
     printf("s> OPERATION REGISTER FROM %s\n", username);
+
     int result = db_register_user(username);
+    unsigned char response = result;
 
-    unsigned char response;
-    if (result == 0) {
-        response = 0;
-        // printf("s> REGISTER OK\n");
-    } else if (result == 1) {
-        response = 1;
-        // printf("s> USERNAME IN USE\n");
-    } else {
-        response = 2;
-        // printf("s> REGISTER FAIL\n");
+    switch (result) {
+        case 0: printf_debug("OK\n"); break;
+        case 1: printf_debug("USERNAME IN USE\n"); break;
+        default:printf_debug("REGISTER FAIL\n"); break;
     }
 
     send(client_fd, &response, 1, 0);
 }
 
-void unregister_handler(int client_fd, const char* username) {
+
+void unregister_handler(int client_fd, const char* buffer) {
+    const char* username = buffer + strlen("UNREGISTER") + 1;
     printf("s> OPERATION UNREGISTER FROM %s\n", username);
-    int result = db_unregister_user(username);
 
-    unsigned char response;
-    if (result == 0) {
-        response = 0;
-        // printf("s> UNREGISTER OK\n");
-    } else if (result == 1) {
-        response = 1;
-        // printf("s> USERNAME DOES NOT EXIST\n");
-    } else {
-        response = 2;
-        // printf("s> UNREGISTER FAIL\n");
+    int result = db_unregister_user(username);
+    unsigned char response = result;
+
+    switch (result) {
+        case 0: printf_debug("OK\n"); break;
+        case 1: printf_debug("USERNAME DOES NOT EXIST\n"); break;
+        default:printf_debug("UNREGISTER FAIL\n"); break;
     }
 
     send(client_fd, &response, 1, 0);
 }
-
 
 
 void connect_handler(int client_fd, const char* buffer, const char* client_ip) {
     const char* username = buffer + strlen("CONNECT") + 1;
-    printf("s> OPERATION CONNECT FROM %s\n", username);
     const char* port_str = username + strlen(username) + 1;
     int port = atoi(port_str);
 
+    printf("s> OPERATION CONNECT FROM %s\n", username);
+    
+    // validar puerto
     if (port <= 0) {
         unsigned char response = 3;
         send(client_fd, &response, 1, 0);
-        // printf("s> CONNECT FAIL (invalid port) from %s\n", username);
+        printf_debug("(invalid port)\n");
         return;
     }
 
-
     int result = db_connect_user(username, port, client_ip);
+    unsigned char response = result;
 
-    unsigned char response;
-    if (result == 0) {
-        response = 0;
-        // printf("s> CONNECT OK for %s\n", username);
-    } else if (result == 1) {
-        response = 1;
-        // printf("s> CONNECT FAIL, USER DOES NOT EXIST: %s\n", username);
-    } else if (result == 2) {
-        response = 2;
-        // printf("s> USER ALREADY CONNECTED: %s\n", username);
-    } else {
-        response = 3;
-        // printf("s> CONNECT FAIL (unknown error) for %s\n", username);
+    switch (result) {
+        case 0: printf_debug("OK\n"); break;
+        case 1: printf_debug("USER DOES NOT EXIST\n"); break;
+        case 2: printf_debug("USER ALREADY CONNECTED\n"); break;
+        default:printf_debug("(unknown error)\n"); break;
     }
 
     send(client_fd, &response, 1, 0);
 }
 
 
-
-void disconnect_handler(int client_fd, const char* username) {
+void disconnect_handler(int client_fd, const char* buffer) {
+    const char* username = buffer + strlen("DISCONNECT") + 1;
     printf("s> OPERATION DISCONNECT FROM %s\n", username);
-    int result = db_disconnect_user(username);
 
-    unsigned char response;
-    if (result == 0) {
-        response = 0;
-        // printf("s> DISCONNECT OK FOR %s\n", username);
-    } else if (result == 1) {
-        response = 1;
-        // printf("s> DISCONNECT FAIL, USER DOES NOT EXIST: %s\n", username);
-    } else if (result == 2) {
-        response = 2;
-        // printf("s> DISCONNECT FAIL, USER NOT CONNECTED: %s\n", username);
-    } else {
-        response = 3;
-        // printf("s> DISCONNECT FAIL (UNKNOWN ERROR) FOR %s\n", username);
+    int result = db_disconnect_user(username);
+    unsigned char response = result;
+
+    switch (result) {
+        case 0: printf_debug("OK\n"); break;
+        case 1: printf_debug("USER DOES NOT EXIST\n"); break;
+        case 2: printf_debug("USER NOT CONNECTED\n"); break;
+        default:printf_debug("(unknown error) \n"); break;
     }
 
     send(client_fd, &response, 1, 0);
 }
-
 
 
 void publish_handler(int client_fd, const char* buffer) {
     const char* username = buffer + strlen("PUBLISH") + 1;
-    printf("s> OPERATION PUBLISH FROM %s\n", username);
     const char* filename = username + strlen(username) + 1;
     const char* description = filename + strlen(filename) + 1;
 
+    printf("s> OPERATION PUBLISH FROM %s\n", username);
 
     int result = db_publish(username, filename, description);
+    unsigned char response = result;
 
-    unsigned char response;
-    if (result == 0) {
-        response = 0;
-        // printf("s> PUBLISH OK for user %s, file %s\n", username, filename);
-    } else if (result == 1) {
-        response = 1;
-        // printf("s> PUBLISH FAIL, USER DOES NOT EXIST: %s\n", username);
-    } else if (result == 2) {
-        response = 2;
-        // printf("s> PUBLISH FAIL, USER NOT CONNECTED: %s\n", username);
-    } else if (result == 3) {
-        response = 3;
-        // printf("s> PUBLISH FAIL, CONTENT ALREADY PUBLISHED: %s (%s)\n", username, filename);
-    } else {
-        response = 4;
-        // printf("s> PUBLISH FAIL (unknown error) for %s\n", username);
+    switch (result) {
+        case 0: printf_debug("OK\n"); break;
+        case 1: printf_debug("USER DOES NOT EXIST\n"); break;
+        case 2: printf_debug("USER NOT CONNECTED\n"); break;
+        case 3: printf_debug("CONTENT ALREADY PUBLISHED (%s)\n", filename); break;
+        default:printf_debug("(unknown error) \n"); break;
     }
 
     send(client_fd, &response, 1, 0);
@@ -271,32 +266,65 @@ void publish_handler(int client_fd, const char* buffer) {
 
 void delete_handler(int client_fd, const char* buffer) {
     const char* username = buffer + strlen("DELETE") + 1;
-    printf("s> OPERATION DELETE FROM %s\n", username);
     const char* filename = username + strlen(username) + 1;
 
+    printf("s> OPERATION DELETE FROM %s\n", username);
 
     int result = db_delete(username, filename);
+    unsigned char response = result;
 
-    unsigned char response;
-    if (result == 0) {
-        response = 0;
-        // printf("s> DELETE OK for user %s, file %s\n", username, filename);
-    } else if (result == 1) {
-        response = 1;
-        // printf("s> DELETE FAIL, USER DOES NOT EXIST: %s\n", username);
-    } else if (result == 2) {
-        response = 2;
-        // printf("s> DELETE FAIL, USER NOT CONNECTED: %s\n", username);
-    } else if (result == 3) {
-        response = 3;
-        // printf("s> DELETE FAIL, CONTENT NOT PUBLISHED: %s (%s)\n", username, filename);
-    } else {
-        response = 4;
-        // printf("s> DELETE FAIL (unknown error) for %s\n", username);
+    switch (result) {
+        case 0: printf_debug("OK\n"); break;
+        case 1: printf_debug("USER DOES NOT EXIST\n"); break;
+        case 2: printf_debug("USER NOT CONNECTED\n"); break;
+        case 3: printf_debug("CONTENT NOT PUBLISHED: (%s)\n", filename); break;
+        default:printf_debug("(unknown error) \n"); break;
     }
 
     send(client_fd, &response, 1, 0);
 }
+
+
+
+void list_users_handler(int client_fd, const char* buffer) {
+    const char* username = buffer + strlen("LIST_USERS") + 1;
+    printf("s> OPERATION LIST_USERS FROM %s\n", username);
+
+    user_entry_t** connected_users = NULL;
+    int user_count = 0;
+    int result = db_list_connected_users(username, &connected_users, &user_count);
+
+    unsigned char response_code = result;
+    send(client_fd, &response_code, 1, 0);
+
+    switch (result) {
+        case 0: {
+            // Enviar número de usuarios como string terminado en '\0'
+                char count_str[16];
+                snprintf(count_str, sizeof(count_str), "%d", user_count);
+                send(client_fd, count_str, strlen(count_str) + 1, 0);
+
+                for (int i = 0; i < user_count; i++) {
+                    // nombre, ip, puerto
+                    send(client_fd, connected_users[i]->username, strlen(connected_users[i]->username) + 1, 0);
+                    send(client_fd, connected_users[i]->ip, strlen(connected_users[i]->ip) + 1, 0);
+
+                    char port_str[16];
+                    snprintf(port_str, sizeof(port_str), "%d", connected_users[i]->listening_port);
+                    send(client_fd, port_str, strlen(port_str) + 1, 0);
+                }
+
+                free(connected_users);
+                printf_debug("OK\n");
+            }
+            break;
+        case 1: printf_debug("USER DOES NOT EXIST\n"); break;
+        case 2: printf_debug("USER NOT CONNECTED\n"); break;
+        default:printf_debug("(unknown error) \n"); break;
+    }
+}
+
+
 
 void list_content_handler(int client_fd, const char* buffer) {
     const char* username = buffer + strlen("LIST_CONTENT") + 1;
@@ -319,58 +347,20 @@ void list_content_handler(int client_fd, const char* buffer) {
         snprintf(count_str, sizeof(count_str), "%d", file_count);
         send(client_fd, count_str, strlen(count_str) + 1, 0);
 
-        // Enviar filename y description de cada fichero
+        // file name y descripcion (de regalo)
         for (int i = 0; i < file_count; i++) {
             send(client_fd, files[i]->filename, strlen(files[i]->filename) + 1, 0);
             send(client_fd, files[i]->description, strlen(files[i]->description) + 1, 0);
         }
 
         free(files);
-        // printf("s> LIST_CONTENT OK for %s\n", remote_username);
+        printf_debug("LIST_CONTENT OK for %s\n", remote_username);
 
     } else {
-        if (result == 1) response = 1;  // USER DOES NOT EXIST
-        else if (result == 2) response = 2;  // USER NOT CONNECTED
-        else if (result == 3) response = 3;  // REMOTE USER DOES NOT EXIST
-        else response = 4;  // UNKNOWN ERROR
+        response = result;
 
         send(client_fd, &response, 1, 0);
-        // printf("s> LIST_CONTENT FAIL for %s (code %d)\n", username, result);
+        printf_debug("LIST_CONTENT FAIL for %s (code %d)\n", username, result);
     }
 }
 
-void list_users_handler(int client_fd, const char* username) {
-    printf("s> OPERATION LIST_USERS FROM %s\n", username);
-    user_entry_t** connected_users = NULL;
-    int user_count = 0;
-    int result = db_list_connected_users(username, &connected_users, &user_count);
-
-    unsigned char response_code;
-
-    if (result == 0) {
-        response_code = 0;
-        send(client_fd, &response_code, 1, 0);
-
-        // Enviar el número de usuarios como string terminado en '\0'
-        char count_str[16];
-        snprintf(count_str, sizeof(count_str), "%d", user_count);
-        send(client_fd, count_str, strlen(count_str) + 1, 0);  // +1 para enviar el '\0'
-
-        for (int i = 0; i < user_count; i++) {
-            send(client_fd, connected_users[i]->username, strlen(connected_users[i]->username) + 1, 0);
-
-            // IP: si no tienes IP real, usa "0.0.0.0"
-            send(client_fd, "0.0.0.0", strlen("0.0.0.0") + 1, 0);
-
-            char port_str[16];
-            snprintf(port_str, sizeof(port_str), "%d", connected_users[i]->listening_port);
-            send(client_fd, port_str, strlen(port_str) + 1, 0);
-        }
-
-        free(connected_users);
-        // printf("s> LIST_USERS OK for %s\n", username);
-    } else  {
-        response_code = result;
-        send(client_fd, &response_code, 1, 0);
-    } 
-}

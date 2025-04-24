@@ -1,5 +1,5 @@
-#ifndef DB_H
-#define DB_H
+#ifndef SERVER_H
+#define SERVER_H
 
 #define USERNAME_MAX 256
 #define FILE_MAX 256
