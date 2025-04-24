@@ -19,7 +19,8 @@ class client :
     _listen_socket = None
     _listen_port = None
     _listen_thread = None
-    _current_user = ""
+    _current_user = None
+    _user_table = {}
 
     # ******************** UTILITIES *****************
     @staticmethod
@@ -42,11 +43,51 @@ class client :
             try:
                 conn, addr = client._listen_socket.accept()
                 print(f"c> Incoming connection from {addr}")
-                # TODO: Here you'd handle GET_FILE requests from other clients.
-                conn.close()
+
+                try:
+                    # Recibir la operación
+                    command = client._recv_string(conn)
+                    if command != "GET FILE":
+                        print(f"c> Unknown command from {addr}: {command}")
+                        conn.close()
+                        continue
+
+                    # Recibir el filename
+                    remote_filename = client._recv_string(conn)
+
+                    try:
+                        with open(remote_filename, "rb") as f:
+                            conn.sendall(b'\x00')  # Success code
+
+                            # Enviar el tamaño del archivo como string
+                            f.seek(0, 2)  # Ir al final del archivo
+                            file_size = f.tell()
+                            f.seek(0)  # Volver al principio
+                            conn.sendall(str(file_size).encode() + b'\0')
+
+                            # Enviar el contenido
+                            while True:
+                                data = f.read(4096)
+                                if not data:
+                                    break
+                                conn.sendall(data)
+                            print(f"c> File {remote_filename} sent successfully.")
+
+                    except FileNotFoundError:
+                        conn.sendall(b'\x01')  # File does not exist
+                        print(f"c> File {remote_filename} does not exist, GET FILE failed.")
+
+                    except Exception as e:
+                        conn.sendall(b'\x02')  # Other error
+                        print(f"c> Error sending file {remote_filename}: {e}")
+
+                finally:
+                    conn.close()
+
             except Exception as e:
                 print(f"c> Listen thread stopped: {e}")
                 break
+
     @staticmethod
     def _recv_string(sock):
         """Recibe una cadena terminada en '\0' desde el socket."""
@@ -63,6 +104,9 @@ class client :
     # ******************** METHODS *******************
     @staticmethod
     def register(user) :
+        if len(user) > 256:
+            print("c> REGISTER FAIL, USERNAME TOO LONG")
+            return client.RC.USER_ERROR
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
@@ -81,6 +125,9 @@ class client :
    
     @staticmethod
     def  unregister(user) :
+        if len(user) > 256:
+            print("c> UNREGISTER FAIL, USERNAME TOO LONG")
+            return client.RC.USER_ERROR
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
@@ -98,6 +145,9 @@ class client :
 
     @staticmethod
     def connect(user):
+        if client._current_user is not None:
+            print(f"c> CONNECT FAIL, {client._current_user} IS ALREADY CONNECTED, DISCONNECT FIRST")
+            return client.RC.USER_ERROR
         try:
             listen_port = client._find_free_port()
 
@@ -153,7 +203,7 @@ class client :
                     client._listen_thread = None
                     client._listen_port = None
                     if client._current_user == user:
-                        client._current_user = ""
+                        client._current_user = None
 
                     return client.RC.OK
 
@@ -179,19 +229,100 @@ class client :
         client._listen_port = None
         return client.RC.ERROR
 
-    @staticmethod
-    def  publish(fileName,  description) :
-        #  Write your code here
-        return client.RC.ERROR
 
     @staticmethod
-    def  delete(fileName) :
-        #  Write your code here
-        return client.RC.ERROR
+    def publish(fileName, description):
+        try:
+            if client._current_user is None:
+                print("c> PUBLISH FAIL, USER NOT CONNECTED")
+                return client.RC.USER_ERROR
+            if ' ' in fileName:
+                print("c> PUBLISH FAIL, FILE NAME MUST NOT CONTAIN SPACES")
+                return client.RC.USER_ERROR
+            if len(fileName.encode()) > 256:
+                print("c> PUBLISH FAIL, FILE NAME TOO LONG")
+                return client.RC.USER_ERROR
+            if len(description.encode()) > 256:
+                print("c> PUBLISH FAIL, DESCRIPTION TOO LONG")
+                return client.RC.USER_ERROR
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((client._server, client._port))
+                s.sendall(b'PUBLISH\0')
+                s.sendall(client._current_user.encode() + b'\0')
+                s.sendall(fileName.encode() + b'\0')
+                s.sendall(description.encode() + b'\0')
+
+                result = s.recv(1)
+
+                if result == b'\x00':
+                    print("c> PUBLISH OK")
+                    return client.RC.OK
+                elif result == b'\x01':
+                    print("c> PUBLISH FAIL, USER DOES NOT EXIST")
+                    return client.RC.USER_ERROR
+                elif result == b'\x02':
+                    print("c> PUBLISH FAIL, USER NOT CONNECTED")
+                    return client.RC.USER_ERROR
+                elif result == b'\x03':
+                    print("c> PUBLISH FAIL, CONTENT ALREADY PUBLISHED")
+                    return client.RC.USER_ERROR
+                else:
+                    print("c> PUBLISH FAIL")
+                    return client.RC.ERROR
+
+        except Exception as e:
+            print(f"c> PUBLISH FAIL {e}")
+            return client.RC.ERROR
+
+    @staticmethod
+    def delete(fileName):
+        try:
+            if client._current_user is None:
+                print("c> DELETE FAIL, USER NOT CONNECTED")
+                return client.RC.USER_ERROR
+            if ' ' in fileName:
+                print("c> DELETE FAIL, FILE NAME MUST NOT CONTAIN SPACES")
+                return client.RC.USER_ERROR
+            if len(fileName.encode()) > 256:
+                print("c> DELETE FAIL, FILE NAME TOO LONG")
+                return client.RC.USER_ERROR
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((client._server, client._port))
+                s.sendall(b'DELETE\0')
+                s.sendall(client._current_user.encode() + b'\0')
+                s.sendall(fileName.encode() + b'\0')
+
+                result = s.recv(1)
+
+                if result == b'\x00':
+                    print("c> DELETE OK")
+                    return client.RC.OK
+                elif result == b'\x01':
+                    print("c> DELETE FAIL, USER DOES NOT EXIST")
+                    return client.RC.USER_ERROR
+                elif result == b'\x02':
+                    print("c> DELETE FAIL, USER NOT CONNECTED")
+                    return client.RC.USER_ERROR
+                elif result == b'\x03':
+                    print("c> DELETE FAIL, CONTENT NOT PUBLISHED")
+                    return client.RC.USER_ERROR
+                else:
+                    print("c> DELETE FAIL")
+                    return client.RC.ERROR
+
+        except Exception as e:
+            print(f"c> DELETE FAIL {e}")
+            return client.RC.ERROR
+
 
 
     @staticmethod
     def listusers():
+        if client._current_user is None:
+            print("c> NO USER IS CONNECTED")
+            return client.RC.USER_ERROR
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
@@ -199,24 +330,29 @@ class client :
                 result = s.recv(1)
 
                 if result == b'\x00':
-                    # Recibir el número de usuarios (como cadena terminada en '\0')
-                    num_users = client._recv_string(s)
-                    count = int(num_users)
+                    num_users_str = client._recv_string(s)
+                    num_users = int(num_users_str)
                     print("c> LIST_USERS OK")
 
-                    for _ in range(count):
+                    # Limpiar la tabla actual:
+                    client._user_table = {}
+
+                    for _ in range(num_users):
                         username = client._recv_string(s)
                         ip = client._recv_string(s)
-                        port = client._recv_string(s)
-                        print(f"\t{username} {ip} {port}")
+                        port = int(client._recv_string(s))
+                        print(f"\t{username:<10} {ip:<10} {port}")
+
+                        # Guardar en la tabla de usuarios conectados:
+                        client._user_table[username] = (ip, port)
 
                     return client.RC.OK
 
                 elif result == b'\x01':
-                    print("c> LIST_USERS FAIL, USER DOES NOT EXIST")
+                    print("c> LIST_USERS FAIL , USER DOES NOT EXIST")
                     return client.RC.USER_ERROR
                 elif result == b'\x02':
-                    print("c> LIST_USERS FAIL, USER NOT CONNECTED")
+                    print("c> LIST_USERS FAIL , USER NOT CONNECTED")
                     return client.RC.USER_ERROR
                 else:
                     print("c> LIST_USERS FAIL")
@@ -230,14 +366,95 @@ class client :
 
 
     @staticmethod
-    def  listcontent(user) :
-        #  Write your code here
-        return client.RC.ERROR
+    def listcontent(remote_user):
+        if client._current_user is None:
+            print("c> NO USER IS CONNECTED")
+            return client.RC.USER_ERROR
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((client._server, client._port))
+                s.sendall(b'LIST_CONTENT\0' + client._current_user.encode() + b'\0' + remote_user.encode() + b'\0')
+                result = s.recv(1)
+
+                if result == b'\x00':  # OK
+                    num_files_str = client._recv_string(s)
+                    num_files = int(num_files_str)
+                    print("c> LIST_CONTENT OK")
+
+                    for _ in range(num_files):
+                        filename = client._recv_string(s)
+                        description = client._recv_string(s)
+                        print(f"\t{filename :<20}\t \"{description}\"")
+
+                    return client.RC.OK
+
+                elif result == b'\x01':
+                    print("c> LIST_CONTENT FAIL , USER DOES NOT EXIST")
+                    return client.RC.USER_ERROR
+                elif result == b'\x02':
+                    print("c> LIST_CONTENT FAIL , USER NOT CONNECTED")
+                    return client.RC.USER_ERROR
+                elif result == b'\x03':
+                    print("c> LIST_CONTENT FAIL , REMOTE USER DOES NOT EXIST")
+                    return client.RC.USER_ERROR
+                else:
+                    print("c> LIST_CONTENT FAIL")
+                    return client.RC.ERROR
+
+        except Exception as e:
+            print(f"c> LIST_CONTENT FAIL {e}")
+            return client.RC.ERROR
+
+
 
     @staticmethod
-    def  getfile(user,  remote_FileName,  local_FileName) :
-        #  Write your code here
-        return client.RC.ERROR
+    def getfile(user, remote_FileName, local_FileName):
+        try:
+            # Buscar en la tabla de usuarios conectados su IP y puerto (deberías tenerlo guardado del LIST_USERS)
+            if user not in client._user_table:
+                print("c> GET_FILE FAIL , USER NOT FOUND")
+                return client.RC.USER_ERROR
+
+            ip, port = client._user_table[user]  # Supone que tienes: client._user_table = {'username': ('ip', port)}
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((ip, port))
+                s.sendall(b'GET FILE\0')
+                s.sendall(remote_FileName.encode() + b'\0')
+
+                result = s.recv(1)
+                if result == b'\x00':  # File exists, starts transfer
+                    file_size_str = client._recv_string(s)
+                    file_size = int(file_size_str)
+
+                    with open(local_FileName, "wb") as f:
+                        bytes_received = 0
+                        while bytes_received < file_size:
+                            chunk = s.recv(min(4096, file_size - bytes_received))
+                            if not chunk:
+                                raise Exception("Connection lost during transfer")
+                            f.write(chunk)
+                            bytes_received += len(chunk)
+
+                    print("c> GET_FILE OK")
+                    return client.RC.OK
+
+                elif result == b'\x01':
+                    print("c> GET_FILE FAIL , FILE NOT EXIST")
+                    return client.RC.USER_ERROR
+                else:
+                    print("c> GET_FILE FAIL")
+                    return client.RC.ERROR
+
+        except Exception as e:
+            print(f"c> GET_FILE FAIL {e}")
+            # Si falla la transferencia, intentar borrar el archivo local si existe:
+            import os
+            try:
+                os.remove(local_FileName)
+            except Exception:
+                pass
+            return client.RC.ERROR
 
     # *
     # **
@@ -329,7 +546,7 @@ class client :
     # *
     # * @brief Parses program execution arguments
     @staticmethod
-    def  parseArguments(argv) :
+    def  parseArguments() :
         parser = argparse.ArgumentParser()
         parser.add_argument('-s', type=str, required=True, help='Server IP')
         parser.add_argument('-p', type=int, required=True, help='Server Port')
@@ -351,8 +568,8 @@ class client :
 
     # ******************** MAIN *********************
     @staticmethod
-    def main(argv) :
-        if (not client.parseArguments(argv)) :
+    def main() :
+        if (not client.parseArguments()) :
             client.usage()
             return
 
@@ -362,4 +579,4 @@ class client :
     
 
 if __name__=="__main__":
-    client.main([])
+    client.main()

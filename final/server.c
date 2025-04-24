@@ -9,15 +9,20 @@
 #define BACKLOG 10
 #define BUF_SIZE 512
 
+struct client_info {
+    int client_fd;
+    struct sockaddr_in client_addr;
+};
+
 void* handle_client(void* arg);
 void register_handler(int client_fd, const char* username);
 void unregister_handler(int client_fd, const char* username);
-void connect_handler(int client_fd, const char* username);
+void connect_handler(int client_fd, const char* buffer, const char* client_ip);
 void disconnect_handler(int client_fd, const char* username);
-void publish_handler(int client_fd);
-void delete_handler(int client_fd);
+void publish_handler(int client_fd, const char* buffer);
+void delete_handler(int client_fd, const char* buffer) ;
 void list_users_handler(int client_fd, const char* username) ;
-void list_content_handler(int client_fd);
+void list_content_handler(int client_fd, const char* buffer) ;
 
 int main(int argc, char* argv[]) {
     if (argc != 3 || strcmp(argv[1], "-p") != 0) {
@@ -69,11 +74,11 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        int* pclient = malloc(sizeof(int));
-        *pclient = client_fd;
-
+        struct client_info* info = malloc(sizeof(struct client_info));
+        info->client_fd = client_fd;
+        info->client_addr = client_addr;
         pthread_t tid;
-        pthread_create(&tid, NULL, handle_client, pclient);
+        pthread_create(&tid, NULL, handle_client, info);
         pthread_detach(tid);
     }
 
@@ -83,8 +88,13 @@ int main(int argc, char* argv[]) {
 }
 
 void* handle_client(void* arg) {
-    int client_fd = *((int*)arg);
-    free(arg);
+    struct client_info* info = (struct client_info*)arg;
+    int client_fd = info->client_fd;
+    struct sockaddr_in client_addr = info->client_addr;
+    free(info);
+
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
 
     char buffer[BUF_SIZE];
     int bytes_read = recv(client_fd, buffer, BUF_SIZE - 1, 0);
@@ -100,21 +110,24 @@ void* handle_client(void* arg) {
             unregister_handler(client_fd, username);
 
         } else if (strncmp(buffer, "CONNECT", 7) == 0) {
-            connect_handler(client_fd, buffer);
+            connect_handler(client_fd, buffer, client_ip);
 
         } else if (strncmp(buffer, "DISCONNECT", 10) == 0) {
             char* username = buffer + strlen("DISCONNECT") + 1;
             disconnect_handler(client_fd, username);
 
         } else if (strncmp(buffer, "PUBLISH", 7) == 0) {
+            publish_handler(client_fd, buffer);
 
         } else if (strncmp(buffer, "DELETE", 6) == 0) {
+            delete_handler(client_fd, buffer);
 
         } else if (strncmp(buffer, "LIST_USERS", 10) == 0) {
             char* username = buffer + strlen("LIST_USERS") + 1;
             list_users_handler(client_fd, username);
 
-        } else if (strncmp(buffer, "LIST CONTENT", 12) == 0) {
+        } else if (strncmp(buffer, "LIST_CONTENT", 12) == 0) {
+            list_content_handler(client_fd, buffer);
 
         } else {
             printf("s> unknown operation\n");
@@ -126,109 +139,208 @@ void* handle_client(void* arg) {
 }
 
 void register_handler(int client_fd, const char* username) {
+    printf("s> OPERATION REGISTER FROM %s\n", username);
     int result = db_register_user(username);
 
     unsigned char response;
     if (result == 0) {
         response = 0;
-        printf("s> REGISTER OK\n");
+        // printf("s> REGISTER OK\n");
     } else if (result == 1) {
         response = 1;
-        printf("s> USERNAME IN USE\n");
+        // printf("s> USERNAME IN USE\n");
     } else {
         response = 2;
-        printf("s> REGISTER FAIL\n");
+        // printf("s> REGISTER FAIL\n");
     }
 
     send(client_fd, &response, 1, 0);
 }
 
 void unregister_handler(int client_fd, const char* username) {
+    printf("s> OPERATION UNREGISTER FROM %s\n", username);
     int result = db_unregister_user(username);
 
     unsigned char response;
     if (result == 0) {
         response = 0;
-        printf("s> UNREGISTER OK\n");
+        // printf("s> UNREGISTER OK\n");
     } else if (result == 1) {
         response = 1;
-        printf("s> USERNAME DOES NOT EXIST\n");
+        // printf("s> USERNAME DOES NOT EXIST\n");
     } else {
         response = 2;
-        printf("s> UNREGISTER FAIL\n");
+        // printf("s> UNREGISTER FAIL\n");
     }
 
     send(client_fd, &response, 1, 0);
 }
 
 
-void connect_handler(int client_fd, const char* buffer) {
-    const char* username = buffer + strlen("CONNECT") + 1;
-    const char* port_str = username + strlen(username) + 1;
 
+void connect_handler(int client_fd, const char* buffer, const char* client_ip) {
+    const char* username = buffer + strlen("CONNECT") + 1;
+    printf("s> OPERATION CONNECT FROM %s\n", username);
+    const char* port_str = username + strlen(username) + 1;
     int port = atoi(port_str);
+
     if (port <= 0) {
         unsigned char response = 3;
         send(client_fd, &response, 1, 0);
-        printf("s> CONNECT FAIL (invalid port) from %s\n", username);
+        // printf("s> CONNECT FAIL (invalid port) from %s\n", username);
         return;
     }
 
-    printf("s> OPERATION CONNECT FROM %s (port %d)\n", username, port);
 
-    int result = db_connect_user(username, port);
+    int result = db_connect_user(username, port, client_ip);
 
     unsigned char response;
     if (result == 0) {
         response = 0;
-        printf("s> CONNECT OK for %s\n", username);
+        // printf("s> CONNECT OK for %s\n", username);
     } else if (result == 1) {
         response = 1;
-        printf("s> CONNECT FAIL, USER DOES NOT EXIST: %s\n", username);
+        // printf("s> CONNECT FAIL, USER DOES NOT EXIST: %s\n", username);
     } else if (result == 2) {
         response = 2;
-        printf("s> USER ALREADY CONNECTED: %s\n", username);
+        // printf("s> USER ALREADY CONNECTED: %s\n", username);
     } else {
         response = 3;
-        printf("s> CONNECT FAIL (unknown error) for %s\n", username);
+        // printf("s> CONNECT FAIL (unknown error) for %s\n", username);
     }
 
     send(client_fd, &response, 1, 0);
 }
 
 
+
 void disconnect_handler(int client_fd, const char* username) {
+    printf("s> OPERATION DISCONNECT FROM %s\n", username);
     int result = db_disconnect_user(username);
 
     unsigned char response;
     if (result == 0) {
         response = 0;
-        printf("s> DISCONNECT OK FOR %s\n", username);
+        // printf("s> DISCONNECT OK FOR %s\n", username);
     } else if (result == 1) {
         response = 1;
-        printf("s> DISCONNECT FAIL, USER DOES NOT EXIST: %s\n", username);
+        // printf("s> DISCONNECT FAIL, USER DOES NOT EXIST: %s\n", username);
     } else if (result == 2) {
         response = 2;
-        printf("s> DISCONNECT FAIL, USER NOT CONNECTED: %s\n", username);
+        // printf("s> DISCONNECT FAIL, USER NOT CONNECTED: %s\n", username);
     } else {
         response = 3;
-        printf("s> DISCONNECT FAIL (UNKNOWN ERROR) FOR %s\n", username);
+        // printf("s> DISCONNECT FAIL (UNKNOWN ERROR) FOR %s\n", username);
     }
 
     send(client_fd, &response, 1, 0);
 }
 
 
-void publish_handler(int client_fd) {
-    // TODO: IMPLEMENTAR
+
+void publish_handler(int client_fd, const char* buffer) {
+    const char* username = buffer + strlen("PUBLISH") + 1;
+    printf("s> OPERATION PUBLISH FROM %s\n", username);
+    const char* filename = username + strlen(username) + 1;
+    const char* description = filename + strlen(filename) + 1;
+
+
+    int result = db_publish(username, filename, description);
+
+    unsigned char response;
+    if (result == 0) {
+        response = 0;
+        // printf("s> PUBLISH OK for user %s, file %s\n", username, filename);
+    } else if (result == 1) {
+        response = 1;
+        // printf("s> PUBLISH FAIL, USER DOES NOT EXIST: %s\n", username);
+    } else if (result == 2) {
+        response = 2;
+        // printf("s> PUBLISH FAIL, USER NOT CONNECTED: %s\n", username);
+    } else if (result == 3) {
+        response = 3;
+        // printf("s> PUBLISH FAIL, CONTENT ALREADY PUBLISHED: %s (%s)\n", username, filename);
+    } else {
+        response = 4;
+        // printf("s> PUBLISH FAIL (unknown error) for %s\n", username);
+    }
+
+    send(client_fd, &response, 1, 0);
 }
 
-void delete_handler(int client_fd) {
-    // TODO: IMPLEMENTAR
+
+void delete_handler(int client_fd, const char* buffer) {
+    const char* username = buffer + strlen("DELETE") + 1;
+    printf("s> OPERATION DELETE FROM %s\n", username);
+    const char* filename = username + strlen(username) + 1;
+
+
+    int result = db_delete(username, filename);
+
+    unsigned char response;
+    if (result == 0) {
+        response = 0;
+        // printf("s> DELETE OK for user %s, file %s\n", username, filename);
+    } else if (result == 1) {
+        response = 1;
+        // printf("s> DELETE FAIL, USER DOES NOT EXIST: %s\n", username);
+    } else if (result == 2) {
+        response = 2;
+        // printf("s> DELETE FAIL, USER NOT CONNECTED: %s\n", username);
+    } else if (result == 3) {
+        response = 3;
+        // printf("s> DELETE FAIL, CONTENT NOT PUBLISHED: %s (%s)\n", username, filename);
+    } else {
+        response = 4;
+        // printf("s> DELETE FAIL (unknown error) for %s\n", username);
+    }
+
+    send(client_fd, &response, 1, 0);
 }
 
+void list_content_handler(int client_fd, const char* buffer) {
+    const char* username = buffer + strlen("LIST_CONTENT") + 1;
+    printf("s> OPERATION LIST_CONTENT FROM %s\n", username);
+    const char* remote_username = username + strlen(username) + 1;
+
+
+    file_entry_t** files = NULL;
+    int file_count = 0;
+
+    int result = db_list_user_content(username, remote_username, &files, &file_count);
+    unsigned char response;
+
+    if (result == 0) {
+        response = 0;
+        send(client_fd, &response, 1, 0);
+
+        // Enviar el número de ficheros publicados como string terminado en '\0'
+        char count_str[16];
+        snprintf(count_str, sizeof(count_str), "%d", file_count);
+        send(client_fd, count_str, strlen(count_str) + 1, 0);
+
+        // Enviar filename y description de cada fichero
+        for (int i = 0; i < file_count; i++) {
+            send(client_fd, files[i]->filename, strlen(files[i]->filename) + 1, 0);
+            send(client_fd, files[i]->description, strlen(files[i]->description) + 1, 0);
+        }
+
+        free(files);
+        // printf("s> LIST_CONTENT OK for %s\n", remote_username);
+
+    } else {
+        if (result == 1) response = 1;  // USER DOES NOT EXIST
+        else if (result == 2) response = 2;  // USER NOT CONNECTED
+        else if (result == 3) response = 3;  // REMOTE USER DOES NOT EXIST
+        else response = 4;  // UNKNOWN ERROR
+
+        send(client_fd, &response, 1, 0);
+        // printf("s> LIST_CONTENT FAIL for %s (code %d)\n", username, result);
+    }
+}
 
 void list_users_handler(int client_fd, const char* username) {
+    printf("s> OPERATION LIST_USERS FROM %s\n", username);
     user_entry_t** connected_users = NULL;
     int user_count = 0;
     int result = db_list_connected_users(username, &connected_users, &user_count);
@@ -256,23 +368,9 @@ void list_users_handler(int client_fd, const char* username) {
         }
 
         free(connected_users);
-        printf("s> LIST_USERS OK for %s\n", username);
-    } else if (result == 1) {
-        response_code = 1;
+        // printf("s> LIST_USERS OK for %s\n", username);
+    } else  {
+        response_code = result;
         send(client_fd, &response_code, 1, 0);
-        printf("s> LIST_USERS FAIL, USER DOES NOT EXIST: %s\n", username);
-    } else if (result == 2) {
-        response_code = 2;
-        send(client_fd, &response_code, 1, 0);
-        printf("s> LIST_USERS FAIL, USER NOT CONNECTED: %s\n", username);
-    } else {
-        response_code = 3;
-        send(client_fd, &response_code, 1, 0);
-        printf("s> LIST_USERS FAIL (UNKNOWN ERROR) for %s\n", username);
-    }
-}
-
-
-void list_content_handler(int client_fd) {
-    // TODO: IMPLEMENTAR
+    } 
 }

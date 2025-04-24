@@ -4,10 +4,25 @@
 #include <pthread.h>
 #include "db.h"
 
-#define USERNAME_MAX 256
-
 static user_entry_t* user_list = NULL;
 static pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int db_is_user_connected(const char* username) {
+    pthread_mutex_lock(&db_mutex);
+
+    user_entry_t* current = user_list;
+    while (current) {
+        if (strcmp(current->username, username) == 0) {
+            int result = current->connected ? 0 : 2;  // 0 = OK (connected), 2 = NOT CONNECTED
+            pthread_mutex_unlock(&db_mutex);
+            return result;
+        }
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&db_mutex);
+    return 1;
+}
 
 void db_init() {
     user_list = NULL;
@@ -76,7 +91,8 @@ int db_unregister_user(const char* username) {
     return 1; // User not found
 }
 
-int db_connect_user(const char* username, int port) {
+
+int db_connect_user(const char* username, int port, const char* ip) {
     pthread_mutex_lock(&db_mutex);
 
     user_entry_t* current = user_list;
@@ -84,10 +100,12 @@ int db_connect_user(const char* username, int port) {
         if (strcmp(current->username, username) == 0) {
             if (current->connected) {
                 pthread_mutex_unlock(&db_mutex);
-                return 2;
+                return 2;  // Already connected
             }
             current->connected = 1;
             current->listening_port = port;
+            strncpy(current->ip, ip, IP_MAX);
+            current->ip[IP_MAX - 1] = '\0';
             pthread_mutex_unlock(&db_mutex);
             return 0;
         }
@@ -95,8 +113,9 @@ int db_connect_user(const char* username, int port) {
     }
 
     pthread_mutex_unlock(&db_mutex);
-    return 1;
+    return 1;  // USER DOES NOT EXIST
 }
+
 
 int db_disconnect_user(const char* username) {
     pthread_mutex_lock(&db_mutex);
@@ -121,42 +140,22 @@ int db_disconnect_user(const char* username) {
 
 
 int db_list_connected_users(const char* username, user_entry_t*** connected_users_out, int* count_out) {
+ 
+    int user_status = db_is_user_connected(username);
+    if (user_status == 1) return 1;
+    if (user_status == 2) return 2;
+
     pthread_mutex_lock(&db_mutex);
-
-    user_entry_t* current = user_list;
-    int found = 0;
-    int is_connected = 0;
-
-    // Comprobar si el usuario que solicita existe y está conectado
-    while (current) {
-        if (strcmp(current->username, username) == 0) {
-            found = 1;
-            is_connected = current->connected;
-            break;
-        }
-        current = current->next;
-    }
-
-    if (!found) {
-        pthread_mutex_unlock(&db_mutex);
-        return 1;  // USER DOES NOT EXIST
-    }
-    if (!is_connected) {
-        pthread_mutex_unlock(&db_mutex);
-        return 2;  // USER NOT CONNECTED
-    }
 
     // Contar usuarios conectados
     int count = 0;
-    current = user_list;
+    user_entry_t* current = user_list;
     while (current) {
         if (current->connected) {
             count++;
         }
         current = current->next;
-    }
-
-    // Crear array dinámico de punteros a user_entry_t conectados
+    }    // Crear array dinámico de punteros a user_entry_t conectados
     user_entry_t** connected_users = malloc(count * sizeof(user_entry_t*));
     if (!connected_users) {
         pthread_mutex_unlock(&db_mutex);
@@ -179,3 +178,137 @@ int db_list_connected_users(const char* username, user_entry_t*** connected_user
     return 0;  // OK
 }
 
+
+int db_publish(const char* username, const char* filename, const char* description) {
+    int user_status = db_is_user_connected(username);
+    if (user_status == 1) return 1;  // USER DOES NOT EXIST
+    if (user_status == 2) return 2;  // USER NOT CONNECTED
+
+    pthread_mutex_lock(&db_mutex);
+
+    user_entry_t* current = user_list;
+    while (current) {
+        if (strcmp(current->username, username) == 0) {
+            // Verificar si el fichero ya está publicado
+            file_entry_t* file = current->published_files;
+            while (file) {
+                if (strcmp(file->filename, filename) == 0) {
+                    pthread_mutex_unlock(&db_mutex);
+                    return 3;  // FILE ALREADY PUBLISHED
+                }
+                file = file->next;
+            }
+
+            // Crear nueva entrada para el fichero
+            file_entry_t* new_file = malloc(sizeof(file_entry_t));
+            if (!new_file) {
+                pthread_mutex_unlock(&db_mutex);
+                return 4;  // MEMORY ERROR
+            }
+            strncpy(new_file->filename, filename, FILE_MAX);
+            new_file->filename[FILE_MAX - 1] = '\0';
+            strncpy(new_file->description, description, DESCRIPTION_MAX);
+            new_file->description[DESCRIPTION_MAX - 1] = '\0';
+            new_file->next = current->published_files;
+            current->published_files = new_file;
+
+            pthread_mutex_unlock(&db_mutex);
+            return 0;  // SUCCESS
+        }
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&db_mutex);
+    return 1;  // USER DOES NOT EXIST (esto nunca debería ocurrir si db_is_user_connected está bien)
+}
+
+
+
+int db_list_user_content(const char* username, const char* remote_username, file_entry_t*** files_out, int* count_out) {
+    int requester_status = db_is_user_connected(username);
+    if (requester_status == 1) return 1;  // USER DOES NOT EXIST
+    if (requester_status == 2) return 2;  // USER NOT CONNECTED
+
+    pthread_mutex_lock(&db_mutex);
+
+    // Buscar al usuario remoto (remote_username)
+    user_entry_t* remote = user_list;
+    while (remote) {
+        if (strcmp(remote->username, remote_username) == 0) {
+            break;
+        }
+        remote = remote->next;
+    }
+
+    if (!remote) {
+        pthread_mutex_unlock(&db_mutex);
+        return 3;  // REMOTE USER DOES NOT EXIST
+    }
+
+    // Contar ficheros publicados por el usuario remoto
+    int count = 0;
+    file_entry_t* file = remote->published_files;
+    while (file) {
+        count++;
+        file = file->next;
+    }
+
+    // Crear array de punteros a file_entry_t
+    file_entry_t** files = malloc(count * sizeof(file_entry_t*));
+    if (!files) {
+        pthread_mutex_unlock(&db_mutex);
+        return 4;  // MEMORY ERROR
+    }
+
+    int idx = 0;
+    file = remote->published_files;
+    while (file) {
+        files[idx++] = file;
+        file = file->next;
+    }
+
+    *files_out = files;
+    *count_out = count;
+    pthread_mutex_unlock(&db_mutex);
+    return 0;  // SUCCESS
+}
+
+
+int db_delete(const char* username, const char* filename) {
+    int user_status = db_is_user_connected(username);
+    if (user_status == 1) return 1;  // USER DOES NOT EXIST
+    if (user_status == 2) return 2;  // USER NOT CONNECTED
+
+    pthread_mutex_lock(&db_mutex);
+
+    user_entry_t* current = user_list;
+    while (current) {
+        if (strcmp(current->username, username) == 0) {
+            file_entry_t* file = current->published_files;
+            file_entry_t* prev = NULL;
+
+            while (file) {
+                if (strcmp(file->filename, filename) == 0) {
+                    // Eliminar el fichero de la lista
+                    if (prev) {
+                        prev->next = file->next;
+                    } else {
+                        current->published_files = file->next;
+                    }
+                    free(file);
+                    pthread_mutex_unlock(&db_mutex);
+                    return 0;  // SUCCESS
+                }
+                prev = file;
+                file = file->next;
+            }
+
+            pthread_mutex_unlock(&db_mutex);
+            return 3;  // FILE NOT PUBLISHED
+        }
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&db_mutex);
+    return 1;  // USER DOES NOT EXIST (esto no debería pasar si db_is_user_connected funciona bien)
+}
