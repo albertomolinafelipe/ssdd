@@ -162,7 +162,8 @@ int main(int argc, char* argv[]) {
 
 
 void register_handler(int client_fd, const char* buffer) {
-    const char* username = buffer + strlen("REGISTER") + 1;
+    const char* datetime = buffer + strlen("REGISTER") + 1;
+    const char* username = datetime + strlen(datetime) + 1;
     printf("s> OPERATION REGISTER FROM %s\n", username);
 
     int result = db_register_user(username);
@@ -179,7 +180,8 @@ void register_handler(int client_fd, const char* buffer) {
 
 
 void unregister_handler(int client_fd, const char* buffer) {
-    const char* username = buffer + strlen("UNREGISTER") + 1;
+    const char* datetime = buffer + strlen("UNREGISTER") + 1;
+    const char* username = datetime + strlen(datetime) + 1;
     printf("s> OPERATION UNREGISTER FROM %s\n", username);
 
     int result = db_unregister_user(username);
@@ -196,7 +198,8 @@ void unregister_handler(int client_fd, const char* buffer) {
 
 
 void connect_handler(int client_fd, const char* buffer, const char* client_ip) {
-    const char* username = buffer + strlen("CONNECT") + 1;
+    const char* datetime = buffer + strlen("CONNECT") + 1;
+    const char* username = datetime + strlen(datetime) + 1;
     const char* port_str = username + strlen(username) + 1;
     int port = atoi(port_str);
 
@@ -225,7 +228,8 @@ void connect_handler(int client_fd, const char* buffer, const char* client_ip) {
 
 
 void disconnect_handler(int client_fd, const char* buffer) {
-    const char* username = buffer + strlen("DISCONNECT") + 1;
+    const char* datetime = buffer + strlen("DISCONNECT") + 1;
+    const char* username = datetime + strlen(datetime) + 1;
     printf("s> OPERATION DISCONNECT FROM %s\n", username);
 
     int result = db_disconnect_user(username);
@@ -243,7 +247,8 @@ void disconnect_handler(int client_fd, const char* buffer) {
 
 
 void publish_handler(int client_fd, const char* buffer) {
-    const char* username = buffer + strlen("PUBLISH") + 1;
+    const char* datetime = buffer + strlen("PUBLISH") + 1;
+    const char* username = datetime + strlen(datetime) + 1;
     const char* filename = username + strlen(username) + 1;
     const char* description = filename + strlen(filename) + 1;
 
@@ -265,7 +270,8 @@ void publish_handler(int client_fd, const char* buffer) {
 
 
 void delete_handler(int client_fd, const char* buffer) {
-    const char* username = buffer + strlen("DELETE") + 1;
+    const char* datetime = buffer + strlen("DELETE") + 1;
+    const char* username = datetime + strlen(datetime) + 1;
     const char* filename = username + strlen(username) + 1;
 
     printf("s> OPERATION DELETE FROM %s\n", username);
@@ -287,7 +293,8 @@ void delete_handler(int client_fd, const char* buffer) {
 
 
 void list_users_handler(int client_fd, const char* buffer) {
-    const char* username = buffer + strlen("LIST_USERS") + 1;
+    const char* datetime = buffer + strlen("LIST_USERS") + 1;
+    const char* username = datetime + strlen(datetime) + 1;
     printf("s> OPERATION LIST_USERS FROM %s\n", username);
 
     user_entry_t** connected_users = NULL;
@@ -327,7 +334,8 @@ void list_users_handler(int client_fd, const char* buffer) {
 
 
 void list_content_handler(int client_fd, const char* buffer) {
-    const char* username = buffer + strlen("LIST_CONTENT") + 1;
+    const char* datetime = buffer + strlen("LIST_CONTENT") + 1;
+    const char* username = datetime + strlen(datetime) + 1;
     printf("s> OPERATION LIST_CONTENT FROM %s\n", username);
     const char* remote_username = username + strlen(username) + 1;
 

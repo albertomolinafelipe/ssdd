@@ -3,6 +3,7 @@ import sys
 import argparse
 import socket
 import threading
+import requests
 
 class client :
 
@@ -24,6 +25,18 @@ class client :
     _user_table = {}
 
     # ******************** UTILITIES *****************
+    @staticmethod
+    def get_datetime_string():
+        try:
+            response = requests.get("http://127.0.0.1:8000/datetime")
+            if response.status_code == 200:
+                return response.text
+            else:
+                raise Exception("HTTP Error getting datetime")
+        except Exception as e:
+            print(f"c> ERROR getting datetime from Web Service: {e}")
+            return None
+
     @staticmethod
     def find_free_port():
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -108,10 +121,16 @@ class client :
         if len(user) > 256:
             print("c> REGISTER FAIL, USERNAME TOO LONG")
             return client.RC.USER_ERROR
+
+        datetime_str = client.get_datetime_string()
+        if datetime_str is None:
+            print("c> REGISTER FAIL, COULD NOT GET DATETIME")
+            return client.RC.ERROR
+
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
-                s.sendall(b'REGISTER\0' + user.encode() + b'\0')
+                s.sendall(b'REGISTER\0' + datetime_str.encode() + b'\0' + user.encode() + b'\0')
                 result = s.recv(1)
                 if result == b'\x00':
                     print("c> REGISTER OK")
@@ -129,10 +148,14 @@ class client :
         if len(user) > 256:
             print("c> UNREGISTER FAIL, USERNAME TOO LONG")
             return client.RC.USER_ERROR
+        datetime_str = client.get_datetime_string()
+        if datetime_str is None:
+            print("c> UNREGISTER FAIL, COULD NOT GET DATETIME")
+            return client.RC.ERROR
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
-                s.sendall(b'UNREGISTER\0' + user.encode() + b'\0')
+                s.sendall(b'UNREGISTER\0' + datetime_str.encode() + b'\0' + user.encode() + b'\0')
                 result = s.recv(1)
                 if result == b'\x00':
                     print("c> UNREGISTER OK")
@@ -149,12 +172,16 @@ class client :
         if client._current_user is not None:
             print(f"c> CONNECT FAIL, {client._current_user} IS ALREADY CONNECTED, DISCONNECT FIRST")
             return client.RC.USER_ERROR
+        datetime_str = client.get_datetime_string()
+        if datetime_str is None:
+            print("c> CONNECT FAIL, COULD NOT GET DATETIME")
+            return client.RC.ERROR
         try:
             listen_port = client._find_free_port()
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
-                s.sendall(b'CONNECT\0' + user.encode() + b'\0' + str(listen_port).encode() + b'\0')
+                s.sendall(b'CONNECT\0' + datetime_str.encode() + b'\0' + user.encode() + b'\0' + str(listen_port).encode() + b'\0')
                 result = s.recv(1)
 
                 if result == b'\x00': 
@@ -188,13 +215,17 @@ class client :
 
     @staticmethod
     def disconnect(user):
+        datetime_str = client.get_datetime_string()
+        if datetime_str is None:
+            print("c> DISCONNECT FAIL, COULD NOT GET DATETIME")
+            return client.RC.ERROR
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
-                s.sendall(b'DISCONNECT\0' + user.encode() + b'\0')
+                s.sendall(b'DISCONNECT\0' + datetime_str.encode() + b'\0' + user.encode() + b'\0')
                 result = s.recv(1)
 
-                if result == b'\x00':  # OK, cerramos el hilo y el socket de escucha
+                if result == b'\x00':
                     print("c> DISCONNECT OK")
 
                     if client._listen_socket:
@@ -233,6 +264,10 @@ class client :
 
     @staticmethod
     def publish(fileName, description):
+        datetime_str = client.get_datetime_string()
+        if datetime_str is None:
+            print("c> PUBLISH FAIL, COULD NOT GET DATETIME")
+            return client.RC.ERROR
         try:
             if client._current_user is None:
                 print("c> PUBLISH FAIL, USER NOT CONNECTED")
@@ -250,6 +285,7 @@ class client :
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
                 s.sendall(b'PUBLISH\0')
+                s.sendall(datetime_str.encode() + b'\0')
                 s.sendall(client._current_user.encode() + b'\0')
                 s.sendall(fileName.encode() + b'\0')
                 s.sendall(description.encode() + b'\0')
@@ -278,6 +314,10 @@ class client :
 
     @staticmethod
     def delete(fileName):
+        datetime_str = client.get_datetime_string()
+        if datetime_str is None:
+            print("c> DELETE FAIL, COULD NOT GET DATETIME")
+            return client.RC.ERROR
         try:
             if client._current_user is None:
                 print("c> DELETE FAIL, USER NOT CONNECTED")
@@ -292,6 +332,7 @@ class client :
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
                 s.sendall(b'DELETE\0')
+                s.sendall(datetime_str.encode() + b'\0')
                 s.sendall(client._current_user.encode() + b'\0')
                 s.sendall(fileName.encode() + b'\0')
 
@@ -324,10 +365,14 @@ class client :
         if client._current_user is None:
             print("c> NO USER IS CONNECTED")
             return client.RC.USER_ERROR
+        datetime_str = client.get_datetime_string()
+        if datetime_str is None:
+            print("c> LIST_USERS FAIL, COULD NOT GET DATETIME")
+            return client.RC.ERROR
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
-                s.sendall(b'LIST_USERS\0' + client._current_user.encode() + b'\0')
+                s.sendall(b'LIST_USERS\0' + datetime_str.encode() + b'\0' + client._current_user.encode() + b'\0')
                 result = s.recv(1)
 
                 if result == b'\x00':
@@ -371,10 +416,14 @@ class client :
         if client._current_user is None:
             print("c> NO USER IS CONNECTED")
             return client.RC.USER_ERROR
+        datetime_str = client.get_datetime_string()
+        if datetime_str is None:
+            print("c> LIST_CONTENT FAIL, COULD NOT GET DATETIME")
+            return client.RC.ERROR
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((client._server, client._port))
-                s.sendall(b'LIST_CONTENT\0' + client._current_user.encode() + b'\0' + remote_user.encode() + b'\0')
+                s.sendall(b'LIST_CONTENT\0' + datetime_str.encode() + b'\0' + client._current_user.encode() + b'\0' + remote_user.encode() + b'\0')
                 result = s.recv(1)
 
                 if result == b'\x00':  # OK
@@ -410,17 +459,22 @@ class client :
 
     @staticmethod
     def getfile(user, remote_FileName, local_FileName):
+        datetime_str = client.get_datetime_string()
+        if datetime_str is None:
+            print("c> GET_FILE FAIL, COULD NOT GET DATETIME")
+            return client.RC.ERROR
         try:
-            # Buscar en la tabla de usuarios conectados su IP y puerto (deberías tenerlo guardado del LIST_USERS)
+            # Buscar en la tabla de usuarios conectados su IP y puerto
             if user not in client._user_table:
                 print("c> GET_FILE FAIL , USER NOT FOUND")
                 return client.RC.USER_ERROR
 
-            ip, port = client._user_table[user]  # Supone que tienes: client._user_table = {'username': ('ip', port)}
+            ip, port = client._user_table[user]
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((ip, port))
                 s.sendall(b'GET FILE\0')
+                s.sendall(datetime_str.encode() + b'\0')
                 s.sendall(remote_FileName.encode() + b'\0')
 
                 result = s.recv(1)
