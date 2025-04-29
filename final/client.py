@@ -51,6 +51,7 @@ class client :
             temp_sock.bind(('', 0))
             return temp_sock.getsockname()[1]
 
+
     @staticmethod
     def _listen_thread_func():
         while True:
@@ -65,6 +66,10 @@ class client :
                         print(f"c> Unknown command from {addr}: {command}")
                         conn.close()
                         continue
+
+                    # Recibir el datetime (nuevo protocolo)
+                    datetime_str = client._recv_string(conn)
+                    print(f"c> Received datetime: {datetime_str}")
 
                     # Recibir el filename
                     remote_filename = client._recv_string(conn)
@@ -101,6 +106,7 @@ class client :
             except Exception as e:
                 print(f"c> Listen thread stopped: {e}")
                 break
+
 
     @staticmethod
     def _recv_string(sock):
@@ -517,12 +523,10 @@ class client :
     @staticmethod
     def shell():
         if not sys.stdin.isatty():
-            # Reading from pipe
             commands = sys.stdin.readlines()
             commands = [cmd.strip() for cmd in commands if cmd.strip() != '']
             commands_iter = iter(commands)
         else:
-            # Interactive mode
             commands_iter = None
 
         while True:
@@ -532,7 +536,8 @@ class client :
                         command = next(commands_iter)
                         print(f"c> {command}")
                     except StopIteration:
-                        break
+                        while True:
+                            continue
                 else:
                     command = input("c> ")
 

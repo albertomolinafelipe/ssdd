@@ -5,10 +5,14 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <rpc/rpc.h>
+#include "logger.h"
 #include "db.h"
 #include "server.h"
 
 int VERBOSE = 0;
+CLIENT *rpc_client = NULL;
+
 
 void printf_debug(const char* format, ...) {
     if (VERBOSE) {
@@ -18,6 +22,34 @@ void printf_debug(const char* format, ...) {
         vprintf(format, args);
         printf("\033[0m");   
         va_end(args);
+    }
+}
+
+void init_logger_client() {
+    char *rpc_server_ip = getenv("LOG_RPC_IP");
+    if (rpc_server_ip == NULL) {
+        fprintf(stderr, "error: LOG_RPC_IP not set\n");
+        exit(EXIT_FAILURE);
+    }
+
+    rpc_client = clnt_create(rpc_server_ip, LOGGER_PROG, LOGGER_VERS, "udp");
+    if (rpc_client == NULL) {
+        clnt_pcreateerror(rpc_server_ip);
+        exit(EXIT_FAILURE);
+    }
+}
+
+void send_log_operation(const char* username, const char* operation, const char* datetime) {
+    if (rpc_client == NULL) return;  // Por seguridad
+
+    log_entry entry;
+    entry.username = (char*) username;
+    entry.operation = (char*) operation;
+    entry.datetime = (char*) datetime;
+
+    int *result = log_operation_1(&entry, rpc_client);
+    if (result == NULL) {
+        clnt_perror(rpc_client, "RPC failed");
     }
 }
 
@@ -100,8 +132,9 @@ int main(int argc, char* argv[]) {
     int server_fd;
     struct sockaddr_in server_addr;
     
-    // Inicializar db
+    // Inicializar db y cliente rpc
     db_init();
+    init_logger_client();
 
     // Socket TCP
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -164,7 +197,7 @@ int main(int argc, char* argv[]) {
 void register_handler(int client_fd, const char* buffer) {
     const char* datetime = buffer + strlen("REGISTER") + 1;
     const char* username = datetime + strlen(datetime) + 1;
-    printf("s> OPERATION REGISTER FROM %s\n", username);
+    send_log_operation(username, "REGISTER", datetime);
 
     int result = db_register_user(username);
     unsigned char response = result;
@@ -182,7 +215,7 @@ void register_handler(int client_fd, const char* buffer) {
 void unregister_handler(int client_fd, const char* buffer) {
     const char* datetime = buffer + strlen("UNREGISTER") + 1;
     const char* username = datetime + strlen(datetime) + 1;
-    printf("s> OPERATION UNREGISTER FROM %s\n", username);
+    send_log_operation(username, "UNREGISTER", datetime);
 
     int result = db_unregister_user(username);
     unsigned char response = result;
@@ -203,7 +236,7 @@ void connect_handler(int client_fd, const char* buffer, const char* client_ip) {
     const char* port_str = username + strlen(username) + 1;
     int port = atoi(port_str);
 
-    printf("s> OPERATION CONNECT FROM %s\n", username);
+    send_log_operation(username, "CONNECT", datetime);
     
     // validar puerto
     if (port <= 0) {
@@ -230,7 +263,7 @@ void connect_handler(int client_fd, const char* buffer, const char* client_ip) {
 void disconnect_handler(int client_fd, const char* buffer) {
     const char* datetime = buffer + strlen("DISCONNECT") + 1;
     const char* username = datetime + strlen(datetime) + 1;
-    printf("s> OPERATION DISCONNECT FROM %s\n", username);
+    send_log_operation(username, "DISCONNECT", datetime);
 
     int result = db_disconnect_user(username);
     unsigned char response = result;
@@ -252,7 +285,9 @@ void publish_handler(int client_fd, const char* buffer) {
     const char* filename = username + strlen(username) + 1;
     const char* description = filename + strlen(filename) + 1;
 
-    printf("s> OPERATION PUBLISH FROM %s\n", username);
+    char operation_str[512];
+    snprintf(operation_str, sizeof(operation_str), "PUBLISH %s", filename);
+    send_log_operation(username, operation_str, datetime);
 
     int result = db_publish(username, filename, description);
     unsigned char response = result;
@@ -274,7 +309,9 @@ void delete_handler(int client_fd, const char* buffer) {
     const char* username = datetime + strlen(datetime) + 1;
     const char* filename = username + strlen(username) + 1;
 
-    printf("s> OPERATION DELETE FROM %s\n", username);
+    char operation_str[512];
+    snprintf(operation_str, sizeof(operation_str), "DELETE %s", filename);
+    send_log_operation(username, operation_str, datetime);
 
     int result = db_delete(username, filename);
     unsigned char response = result;
@@ -295,7 +332,7 @@ void delete_handler(int client_fd, const char* buffer) {
 void list_users_handler(int client_fd, const char* buffer) {
     const char* datetime = buffer + strlen("LIST_USERS") + 1;
     const char* username = datetime + strlen(datetime) + 1;
-    printf("s> OPERATION LIST_USERS FROM %s\n", username);
+    send_log_operation(username, "LIST_USERS", datetime);
 
     user_entry_t** connected_users = NULL;
     int user_count = 0;
@@ -336,7 +373,7 @@ void list_users_handler(int client_fd, const char* buffer) {
 void list_content_handler(int client_fd, const char* buffer) {
     const char* datetime = buffer + strlen("LIST_CONTENT") + 1;
     const char* username = datetime + strlen(datetime) + 1;
-    printf("s> OPERATION LIST_CONTENT FROM %s\n", username);
+    send_log_operation(username, "LIST_CONTENT", datetime);
     const char* remote_username = username + strlen(username) + 1;
 
 
