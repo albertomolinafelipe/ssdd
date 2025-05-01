@@ -12,10 +12,13 @@ struct client_info {
 
 void register_handler(int client_fd, const char* username);
 void unregister_handler(int client_fd, const char* username);
+
 void connect_handler(int client_fd, const char* buffer, const char* client_ip);
 void disconnect_handler(int client_fd, const char* username);
+
 void publish_handler(int client_fd, const char* buffer);
 void delete_handler(int client_fd, const char* buffer) ;
+
 void list_users_handler(int client_fd, const char* username) ;
 void list_content_handler(int client_fd, const char* buffer) ;
 

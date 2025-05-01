@@ -28,6 +28,7 @@ class client :
     @staticmethod
     def get_datetime_string():
         try:
+            # web server está en la misma máquina
             response = requests.get("http://127.0.0.1:8000/datetime")
             if response.status_code == 200:
                 return response.text
@@ -38,74 +39,10 @@ class client :
             return None
 
     @staticmethod
-    def find_free_port():
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(('', 0))
-        port = s.getsockname()[1]
-        s.close()
-        return port
-
-    @staticmethod
     def _find_free_port():
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as temp_sock:
             temp_sock.bind(('', 0))
             return temp_sock.getsockname()[1]
-
-
-    @staticmethod
-    def _listen_thread_func():
-        while True:
-            try:
-                conn, addr = client._listen_socket.accept()
-                print(f"c> Incoming connection from {addr}")
-
-                try:
-                    # Recibir la operación
-                    command = client._recv_string(conn)
-                    if command != "GET FILE":
-                        print(f"c> Unknown command from {addr}: {command}")
-                        conn.close()
-                        continue
-
-                    # Recibir el datetime (nuevo protocolo)
-                    datetime_str = client._recv_string(conn)
-                    print(f"c> Received datetime: {datetime_str}")
-
-                    # Recibir el filename
-                    remote_filename = client._recv_string(conn)
-
-                    try:
-                        with open(remote_filename, "rb") as f:
-                            conn.sendall(b'\x00')  # Success code
-
-                            # Enviar el tamaño del archivo como string
-                            f.seek(0, 2)  # Ir al final del archivo
-                            file_size = f.tell()
-                            f.seek(0)  # Volver al principio
-                            conn.sendall(str(file_size).encode() + b'\0')
-
-                            # Enviar el contenido
-                            while True:
-                                data = f.read(4096)
-                                if not data:
-                                    break
-                                conn.sendall(data)
-                            print(f"c> File {remote_filename} sent successfully.")
-
-                    except FileNotFoundError:
-                        conn.sendall(b'\x01')  # File does not exist
-                        print(f"c> File {remote_filename} does not exist, GET FILE failed.")
-
-                    except Exception as e:
-                        conn.sendall(b'\x02')  # Other error
-                        print(f"c> Error sending file {remote_filename}: {e}")
-
-                finally:
-                    conn.close()
-
-            except Exception as e:
-                print(f"c> Listen thread stopped: {e}")
-                break
 
 
     @staticmethod
@@ -121,7 +58,66 @@ class client :
             data += byte
         return data.decode()
 
+    @staticmethod
+    def _listen_thread_func():
+        if client._listen_socket is None:
+            print(f"c> Socket not bound")
+            return
+
+        while True:
+            try:
+                conn, addr = client._listen_socket.accept()
+
+                try:
+                    # Recibir la operación
+                    command = client._recv_string(conn)
+                    if command != "GET_FILE":
+                        print(f"c> Unknown command from {addr}: {command}")
+                        conn.close()
+                        continue
+
+                    datetime_str = client._recv_string(conn)
+                    remote_filename = client._recv_string(conn)
+
+                    try:
+                        with open(remote_filename, "rb") as f:
+                            conn.sendall(b'\x00')  # Success code
+
+                            # Enviar el tamaño del archivo como string
+                            f.seek(0, 2)
+                            file_size = f.tell()
+                            f.seek(0)
+                            conn.sendall(str(file_size).encode() + b'\0')
+
+                            # Enviar el contenido
+                            while True:
+                                data = f.read(4096)
+                                if not data:
+                                    break
+                                conn.sendall(data)
+                            print(f"c> File {remote_filename} sent successfully.")
+
+                    except FileNotFoundError:
+                        conn.sendall(b'\x01')
+                        print(f"c> File {remote_filename} does not exist, GET FILE failed.")
+
+                    except Exception as e:
+                        conn.sendall(b'\x02')
+                        print(f"c> Error sending file {remote_filename}: {e}")
+
+                finally:
+                    conn.close()
+
+            except Exception as e:
+                print(f"c> Listen thread stopped: {e}")
+                break
+
+
+
     # ******************** METHODS *******************
+
+    # *
+    # * @brief Basic command to register user
     @staticmethod
     def register(user) :
         if len(user) > 256:
@@ -149,6 +145,8 @@ class client :
             return client.RC.ERROR
 
    
+    # *
+    # * @brief Basic command to unregister user
     @staticmethod
     def  unregister(user) :
         if len(user) > 256:
@@ -173,11 +171,19 @@ class client :
             print(f"c> UNREGISTER FAIL {e}")
             return client.RC.ERROR
 
+    
+    # *
+    # * @brief Send command and start server thread
+    # * There can only be 1 user connected per client
     @staticmethod
     def connect(user):
+
+        # Si un usuario ya esta conectado con el mismo cliente
+        # Por simplicidad, no dejamos que se conecte otro
         if client._current_user is not None:
             print(f"c> CONNECT FAIL, {client._current_user} IS ALREADY CONNECTED, DISCONNECT FIRST")
             return client.RC.USER_ERROR
+
         datetime_str = client.get_datetime_string()
         if datetime_str is None:
             print("c> CONNECT FAIL, COULD NOT GET DATETIME")
@@ -219,8 +225,17 @@ class client :
         client._listen_thread = None
         return client.RC.ERROR
 
+    
+    # *
+    # * @brief Send command and close server thread
+    # * A client can only disconnect the user that is currently connected
     @staticmethod
     def disconnect(user):
+
+        if user != client._current_user:
+            print(f"c> DISCONNECT FAIL, YOU CAN ONLY DISCONNECT THE USER CURRENTLY CONNECTED IN THIS CLIENT")
+            return client.RC.USER_ERROR
+
         datetime_str = client.get_datetime_string()
         if datetime_str is None:
             print("c> DISCONNECT FAIL, COULD NOT GET DATETIME")
@@ -240,8 +255,7 @@ class client :
 
                     client._listen_thread = None
                     client._listen_port = None
-                    if client._current_user == user:
-                        client._current_user = None
+                    client._current_user = None
 
                     return client.RC.OK
 
@@ -259,15 +273,8 @@ class client :
             print(f"c> DISCONNECT FAIL {e}")
             return client.RC.ERROR
 
-        # Cleanup por si acaso (aunque debería estar cerrado ya)
-        if client._listen_socket is not None:
-            client._listen_socket.close()
-            client._listen_socket = None
-        client._listen_thread = None
-        client._listen_port = None
-        return client.RC.ERROR
-
-
+    # *
+    # * @brief Send command with file and description
     @staticmethod
     def publish(fileName, description):
         datetime_str = client.get_datetime_string()
@@ -318,6 +325,8 @@ class client :
             print(f"c> PUBLISH FAIL {e}")
             return client.RC.ERROR
 
+    # *
+    # * @brief Send command with file to delete
     @staticmethod
     def delete(fileName):
         datetime_str = client.get_datetime_string()
@@ -366,8 +375,12 @@ class client :
 
 
 
+    # *
+    # * @brief Send command and populate user table
     @staticmethod
     def listusers():
+        
+        # client check for connected user
         if client._current_user is None:
             print("c> NO USER IS CONNECTED")
             return client.RC.USER_ERROR
@@ -386,7 +399,6 @@ class client :
                     num_users = int(num_users_str)
                     print("c> LIST_USERS OK")
 
-                    # Limpiar la tabla actual:
                     client._user_table = {}
 
                     for _ in range(num_users):
@@ -417,8 +429,12 @@ class client :
 
 
 
+    # *
+    # * @brief Send command and show info
     @staticmethod
     def listcontent(remote_user):
+        
+        # client check for connected user
         if client._current_user is None:
             print("c> NO USER IS CONNECTED")
             return client.RC.USER_ERROR
@@ -432,11 +448,12 @@ class client :
                 s.sendall(b'LIST_CONTENT\0' + datetime_str.encode() + b'\0' + client._current_user.encode() + b'\0' + remote_user.encode() + b'\0')
                 result = s.recv(1)
 
-                if result == b'\x00':  # OK
+                if result == b'\x00':
                     num_files_str = client._recv_string(s)
                     num_files = int(num_files_str)
                     print("c> LIST_CONTENT OK")
 
+                    # Ademas del nombre enseñamos la descripción del fichero
                     for _ in range(num_files):
                         filename = client._recv_string(s)
                         description = client._recv_string(s)
@@ -463,6 +480,8 @@ class client :
 
 
 
+    # *
+    # * @brief Send command to stored ip and port and write to local file
     @staticmethod
     def getfile(user, remote_FileName, local_FileName):
         datetime_str = client.get_datetime_string()
@@ -479,12 +498,12 @@ class client :
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((ip, port))
-                s.sendall(b'GET FILE\0')
+                s.sendall(b'GET_FILE\0')
                 s.sendall(datetime_str.encode() + b'\0')
                 s.sendall(remote_FileName.encode() + b'\0')
 
                 result = s.recv(1)
-                if result == b'\x00':  # File exists, starts transfer
+                if result == b'\x00':
                     file_size_str = client._recv_string(s)
                     file_size = int(file_size_str)
 
@@ -522,133 +541,127 @@ class client :
     # * @brief Command interpreter for the client. It calls the protocol functions.
     @staticmethod
     def shell():
+        commands_iter = None
+
+        # piped input
         if not sys.stdin.isatty():
-            commands = sys.stdin.readlines()
-            commands = [cmd.strip() for cmd in commands if cmd.strip() != '']
+            commands = sys.stdin.read().splitlines()
+            commands = [cmd.strip() for cmd in commands if cmd.strip()]
             commands_iter = iter(commands)
+
+            # vovler a abrir para seguir recibiendo desde la terminal
+            tty = open("/dev/tty")
         else:
-            commands_iter = None
+            tty = sys.stdin
 
-        while True:
-            try:
-                if commands_iter:
-                    try:
-                        command = next(commands_iter)
-                        print(f"c> {command}")
-                    except StopIteration:
-                        while True:
-                            continue
+        def process_command(command):
+            line = command.strip().split()
+            if not line:
+                return
+            line[0] = line[0].upper()
+
+            if line[0] == "REGISTER":
+                if len(line) == 2:
+                    client.register(line[1])
                 else:
-                    command = input("c> ")
+                    print("Syntax error. Usage: REGISTER <userName>")
 
-                line = command.split(" ")
-                if len(line) > 0:
-                    line[0] = line[0].upper()
+            elif line[0] == "UNREGISTER":
+                if len(line) == 2:
+                    client.unregister(line[1])
+                else:
+                    print("Syntax error. Usage: UNREGISTER <userName>")
 
-                    if line[0] == "REGISTER":
-                        if len(line) == 2:
-                            client.register(line[1])
-                        else:
-                            print("Syntax error. Usage: REGISTER <userName>")
+            elif line[0] == "CONNECT":
+                if len(line) == 2:
+                    client.connect(line[1])
+                else:
+                    print("Syntax error. Usage: CONNECT <userName>")
 
-                    elif line[0] == "UNREGISTER":
-                        if len(line) == 2:
-                            client.unregister(line[1])
-                        else:
-                            print("Syntax error. Usage: UNREGISTER <userName>")
+            elif line[0] == "PUBLISH":
+                if len(line) >= 3:
+                    description = ' '.join(line[2:])
+                    client.publish(line[1], description)
+                else:
+                    print("Syntax error. Usage: PUBLISH <fileName> <description>")
 
-                    elif line[0] == "CONNECT":
-                        if len(line) == 2:
-                            client.connect(line[1])
-                        else:
-                            print("Syntax error. Usage: CONNECT <userName>")
+            elif line[0] == "DELETE":
+                if len(line) == 2:
+                    client.delete(line[1])
+                else:
+                    print("Syntax error. Usage: DELETE <fileName>")
 
-                    elif line[0] == "PUBLISH":
-                        if len(line) >= 3:
-                            description = ' '.join(line[2:])
-                            client.publish(line[1], description)
-                        else:
-                            print("Syntax error. Usage: PUBLISH <fileName> <description>")
+            elif line[0] == "LIST_USERS":
+                if len(line) == 1:
+                    client.listusers()
+                else:
+                    print("Syntax error. Use: LIST_USERS")
 
-                    elif line[0] == "DELETE":
-                        if len(line) == 2:
-                            client.delete(line[1])
-                        else:
-                            print("Syntax error. Usage: DELETE <fileName>")
+            elif line[0] == "LIST_CONTENT":
+                if len(line) == 2:
+                    client.listcontent(line[1])
+                else:
+                    print("Syntax error. Usage: LIST_CONTENT <userName>")
 
-                    elif line[0] == "LIST_USERS":
-                        if len(line) == 1:
-                            client.listusers()
-                        else:
-                            print("Syntax error. Use: LIST_USERS")
+            elif line[0] == "DISCONNECT":
+                if len(line) == 2:
+                    client.disconnect(line[1])
+                else:
+                    print("Syntax error. Usage: DISCONNECT <userName>")
 
-                    elif line[0] == "LIST_CONTENT":
-                        if len(line) == 2:
-                            client.listcontent(line[1])
-                        else:
-                            print("Syntax error. Usage: LIST_CONTENT <userName>")
+            elif line[0] == "GET_FILE":
+                if len(line) == 4:
+                    client.getfile(line[1], line[2], line[3])
+                else:
+                    print("Syntax error. Usage: GET_FILE <userName> <remote_fileName> <local_fileName>")
 
-                    elif line[0] == "DISCONNECT":
-                        if len(line) == 2:
-                            client.disconnect(line[1])
-                        else:
-                            print("Syntax error. Usage: DISCONNECT <userName>")
+            elif line[0] == "QUIT":
+                if len(line) == 1:
+                    sys.exit(0)
+                else:
+                    print("Syntax error. Use: QUIT")
 
-                    elif line[0] == "GET_FILE":
-                        if len(line) == 4:
-                            client.getfile(line[1], line[2], line[3])
-                        else:
-                            print("Syntax error. Usage: GET_FILE <userName> <remote_fileName> <local_fileName>")
+            else:
+                print(f"Error: command {line[0]} not valid.")
 
-                    elif line[0] == "QUIT":
-                        if len(line) == 1:
-                            break
-                        else:
-                            print("Syntax error. Use: QUIT")
-                    else:
-                        print("Error: command " + line[0] + " not valid.")
-            except Exception as e:
-                print("Exception: " + str(e))
+        try:
+            if commands_iter:
+                for command in commands_iter:
+                    process_command(command)
 
+            while True:
+                try:
+                    print("c> ", end='', flush=True)
+                    command = tty.readline()
+                    if not command:
+                        break
+                    process_command(command)
+                except EOFError:
+                    break
 
-    # *
-    # * @brief Prints program usage
-    @staticmethod
-    def usage() :
-        print("Usage: python3 client.py -s <server> -p <port>")
+        except Exception as e:
+            print("Exception:", str(e))
 
 
     # *
     # * @brief Parses program execution arguments
     @staticmethod
-    def  parseArguments() :
+    def parseArguments():
         parser = argparse.ArgumentParser()
         parser.add_argument('-s', type=str, required=True, help='Server IP')
         parser.add_argument('-p', type=int, required=True, help='Server Port')
         args = parser.parse_args()
 
-        if (args.s is None):
-            parser.error("Usage: python3 client.py -s <server> -p <port>")
-            return False
+        if args.p < 1024 or args.p > 65535:
+            parser.error("Error: Port must be in the range 1024 <= port <= 65535")
 
-        if ((args.p < 1024) or (args.p > 65535)):
-            parser.error("Error: Port must be in the range 1024 <= port <= 65535");
-            return False;
-        
         client._server = args.s
         client._port = args.p
 
-        return True
 
-
-    # ******************** MAIN *********************
     @staticmethod
-    def main() :
-        if (not client.parseArguments()) :
-            client.usage()
-            return
-
-        #  Write code here
+    def main():
+        client.parseArguments()
         client.shell()
         print("+++ FINISHED +++")
     

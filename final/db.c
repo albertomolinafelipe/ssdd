@@ -7,6 +7,7 @@
 static user_entry_t* user_list = NULL;
 static pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+
 int db_is_user_connected(const char* username) {
     pthread_mutex_lock(&db_mutex);
 
@@ -62,7 +63,7 @@ int db_register_user(const char* username) {
     if (!new_entry) {
         pthread_mutex_unlock(&db_mutex);
         // error no previsto
-        return -1;
+        return 2;
     }
     strncpy(new_entry->username, username, USERNAME_MAX);
     new_entry->username[USERNAME_MAX - 1] = '\0';
@@ -331,7 +332,8 @@ int db_list_user_content(const char* username, const char* remote_username, file
     file_entry_t** files = malloc(count * sizeof(file_entry_t*));
     if (!files) {
         pthread_mutex_unlock(&db_mutex);
-        return 4;  // MEMORY ERROR
+        // error no previsto
+        return 4;
     }
 
     int idx = 0;
@@ -344,7 +346,8 @@ int db_list_user_content(const char* username, const char* remote_username, file
     *files_out = files;
     *count_out = count;
     pthread_mutex_unlock(&db_mutex);
-    return 0;  // SUCCESS
+    // exito
+    return 0;
 }
 
 

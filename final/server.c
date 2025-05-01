@@ -14,6 +14,8 @@ int VERBOSE = 0;
 CLIENT *rpc_client = NULL;
 
 
+// ====================== UTILS =========================================
+
 void printf_debug(const char* format, ...) {
     if (VERBOSE) {
         va_list args;
@@ -40,7 +42,7 @@ void init_logger_client() {
 }
 
 void send_log_operation(const char* username, const char* operation, const char* datetime) {
-    if (rpc_client == NULL) return;  // Por seguridad
+    if (rpc_client == NULL) return;
 
     log_entry entry;
     entry.username = (char*) username;
@@ -53,6 +55,9 @@ void send_log_operation(const char* username, const char* operation, const char*
     }
 }
 
+// ====================== MAIN, THREAD FUNC =============================
+
+// Leer del socket y redirigir al handler específico
 void* handle_client(void* arg) {
 
     // Extraer argumentos
@@ -103,7 +108,7 @@ void* handle_client(void* arg) {
     pthread_exit(NULL);
 }
 
-
+// Inicializar cliente rpc, base de datos y bucle principal
 int main(int argc, char* argv[]) {
     int port;
     if (argc < 3) {
@@ -167,7 +172,7 @@ int main(int argc, char* argv[]) {
     printf("s> init server 0.0.0.0:%d\n", port);
     printf("s>\n");
 
-    // Bucle multihilo
+    // bucle principal
     while (1) {
         struct sockaddr_in client_addr;
         socklen_t sin_size = sizeof(struct sockaddr_in);
@@ -191,7 +196,16 @@ int main(int argc, char* argv[]) {
 }
 
 
-// ================== HANDLERS ====================
+// ====================== HANDLERS ======================================
+//
+// Excepto los comandos list, todos siguen la misma estructura
+// - extraer contenido del buffer leido del socket
+// - mandar comando al servidor RPC
+// - correspondiente llamada de db
+// - responder
+//
+// Los comandos de listar preparan la información recibida de la base de datos 
+// y la mandan por el socket
 
 
 void register_handler(int client_fd, const char* buffer) {
@@ -343,7 +357,7 @@ void list_users_handler(int client_fd, const char* buffer) {
 
     switch (result) {
         case 0: {
-            // Enviar número de usuarios como string terminado en '\0'
+                // Enviar número de usuarios como string terminado en '\0'
                 char count_str[16];
                 snprintf(count_str, sizeof(count_str), "%d", user_count);
                 send(client_fd, count_str, strlen(count_str) + 1, 0);
