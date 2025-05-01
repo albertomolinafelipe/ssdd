@@ -15,11 +15,6 @@ if [ "$MODE" = "-c" ]; then
 
     INPUT_FILE="$2"
 
-    # Prepare container
-    apt install pip -y > /dev/null 2>&1
-    source .venv/bin/activate 
-    pip install flask > /dev/null 2>&1
-
     # SERVER WILL RUN ON DOCKER 1
     IP=$(head -n 1 ../machines)
 

@@ -3,7 +3,7 @@ import sys
 import argparse
 import socket
 import threading
-import requests
+import http.client
 
 class client :
 
@@ -28,10 +28,11 @@ class client :
     @staticmethod
     def get_datetime_string():
         try:
-            # web server está en la misma máquina
-            response = requests.get("http://127.0.0.1:8000/datetime")
-            if response.status_code == 200:
-                return response.text
+            conn = http.client.HTTPConnection("127.0.0.1", 8000)
+            conn.request("GET", "/datetime")
+            response = conn.getresponse()
+            if response.status == 200:
+                return response.read().decode()
             else:
                 raise Exception("HTTP Error getting datetime")
         except Exception as e:
