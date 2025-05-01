@@ -181,7 +181,7 @@ class client :
 
         # Si un usuario ya esta conectado con el mismo cliente
         # Por simplicidad, no dejamos que se conecte otro
-        if client._current_user is not None:
+        if client._current_user is not None and client._current_user != user:
             print(f"c> CONNECT FAIL, {client._current_user} IS ALREADY CONNECTED, DISCONNECT FIRST")
             return client.RC.USER_ERROR
 
@@ -628,6 +628,7 @@ class client :
         try:
             if commands_iter:
                 for command in commands_iter:
+                    print(f"c> {command}")
                     process_command(command)
 
             while True:
