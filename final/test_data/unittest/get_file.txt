@@ -1,0 +1,5 @@
+REGISTER get_file
+LIST_USERS
+GET_FILE no_user no_file remote_copy
+GET_FILE publish_1 no_file remote_copy
+GET_FILE publish_1 test_data/unittest/publish2.txt remote_copy

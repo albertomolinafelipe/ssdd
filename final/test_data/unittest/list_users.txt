@@ -1,0 +1,3 @@
+REGISTER list_users
+CONNECT list_users
+LIST_USERS

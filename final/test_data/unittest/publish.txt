@@ -1,0 +1,7 @@
+PUBLISH test_data/unittest/publish.txt dumb_file
+REGISTER publish
+CONNECT publish
+PUBLISH test_data/unittest/publish.txt dumb_file
+PUBLISH test_data/unittest/publish.txt dumb_file
+DISCONNECT publish
+PUBLISH test_data/unittest/connect.txt dumb_file

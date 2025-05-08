@@ -100,7 +100,7 @@ class client :
 
                     except FileNotFoundError:
                         conn.sendall(b'\x01')
-                        print(f"c> File {remote_filename} does not exist, GET FILE failed.")
+                        print(f"File {remote_filename} does not exist, GET FILE failed.")
 
                     except Exception as e:
                         conn.sendall(b'\x02')
@@ -138,6 +138,9 @@ class client :
                 if result == b'\x00':
                     print("c> REGISTER OK")
                     return client.RC.OK
+                elif result == b'\x01':
+                    print("c> USERNAME ALREADY IN USER")
+                    return client.RC.ERROR
                 else:
                     print("c> REGISTER FAIL")
                     return client.RC.ERROR
@@ -165,6 +168,9 @@ class client :
                 if result == b'\x00':
                     print("c> UNREGISTER OK")
                     return client.RC.OK
+                elif result == b'\x01':
+                    print("c> USER DOES NOT EXIST")
+                    return client.RC.ERROR
                 else:
                     print("c> UNREGISTER FAIL")
                     return client.RC.ERROR

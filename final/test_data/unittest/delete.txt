@@ -1,0 +1,7 @@
+REGISTER delete
+CONNECT delete
+PUBLISH delete.txt dumb_file
+DELETE delete.txt
+DELETE delete.txt
+DISCONNECT delete
+DELETE delete.txt

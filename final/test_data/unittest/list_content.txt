@@ -1,0 +1,4 @@
+REGISTER list_content
+cONNECT list_content
+lIST_USERS
+LIST_CONTENT publIsh_1

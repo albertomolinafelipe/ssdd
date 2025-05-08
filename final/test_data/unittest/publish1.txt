@@ -1,0 +1,4 @@
+REGISTER publish_1 
+CONNECT publish_1
+PUBLISH test_data/unittest/publish1.txt dumb_file_11
+PUBLISH test_data/unittest/publish2.txt dumb_file_12
