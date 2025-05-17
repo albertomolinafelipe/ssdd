@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -fPIC -g -D_REENTRANT -I/usr/include/tirpc
+CFLAGS = -Wall -pthread -I/usr/include/tirpc
 LDFLAGS = -lrt -ltirpc
 BINDIR = bin
 
@@ -16,11 +16,11 @@ all: $(BINDIR)/$(TARGET) $(BINDIR)/$(RPC_TARGET)
 
 $(BINDIR)/$(TARGET): $(RPC_GEN) $(SRCS)
 	mkdir -p $(BINDIR)
-	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $(BINDIR)/$(TARGET) $(SRCS) $(LDFLAGS)
 
 $(BINDIR)/$(RPC_TARGET): $(RPC_GEN) $(RPC_SRCS)
 	mkdir -p $(BINDIR)
-	$(CC) $(CFLAGS) -o $@ $(RPC_SRCS) $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $(BINDIR)/$(RPC_TARGET) $(RPC_SRCS) $(LDFLAGS)
 
 $(RPC_GEN): $(RPCX)
 	rpcgen $(RPCX)
