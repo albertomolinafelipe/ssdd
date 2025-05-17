@@ -16,4 +16,3 @@ int *log_operation_1_svc(log_entry *entry, struct svc_req *req) {
     result = 0;
     return &result;
 }
-

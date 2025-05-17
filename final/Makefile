@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -pthread
+CFLAGS = -Wall -fPIC -g -D_REENTRANT -I/usr/include/tirpc
 LDFLAGS = -lrt -ltirpc
 BINDIR = bin
 
